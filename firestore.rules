@@ -1,0 +1,214 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* =========================
+       🔐 HELPER FUNCTIONS
+    ==========================*/
+
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isValidDomain() {
+      return request.auth.token.email.matches('.*@fshnstudent.info$');
+    }
+
+    function isStudent() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isTeacher() {
+      return exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+    }
+
+    function isApprovedStudent() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true;
+    }
+
+    function sameUser(userId) {
+      return request.auth.uid == userId;
+    }
+
+    /* =========================
+       👤 USERS (STUDENTS)
+    ==========================*/
+
+    match /users/{userId} {
+
+      allow create: if isLoggedIn()
+                    && isEmailVerified()
+                    && isValidDomain();
+
+      allow read: if isLoggedIn()
+                  && sameUser(userId);
+
+      allow update: if isLoggedIn()
+                    && sameUser(userId)
+                    && !("approved" in request.resource.data); 
+
+      allow delete: if false;
+    }
+
+    /* =========================
+       👨🏫 TEACHERS
+    ==========================*/
+
+    match /teachers/{teacherId} {
+
+      allow create: if isLoggedIn()
+                    && isEmailVerified()
+                    && isValidDomain();
+
+      allow read, update: if isLoggedIn()
+                          && sameUser(teacherId)
+                          && isTeacher();
+
+      allow delete: if false;
+    }
+
+    /* =========================
+       🏫 CLASSROOMS
+    ==========================*/
+
+    match /classrooms/{classroomId} {
+
+      allow read: if isLoggedIn()
+                  && isValidDomain();
+
+      allow create, update, delete: if isLoggedIn()
+                                    && isTeacher();
+    }
+
+    /* =========================
+       📝 TESTS
+    ==========================*/
+
+    match /tests/{testId} {
+
+      allow read: if isLoggedIn()
+                  && isApprovedStudent();
+
+      allow create, update, delete: if isLoggedIn()
+                                    && isTeacher();
+    }
+
+    /* =========================
+       📚 HOMEWORK
+    ==========================*/
+
+    match /homework/{homeworkId} {
+
+      allow read: if isLoggedIn()
+                  && isApprovedStudent();
+
+      allow create, update, delete: if isLoggedIn()
+                                    && isTeacher();
+    }
+
+    /* =========================
+       📊 RESULTS
+    ==========================*/
+
+    match /results/{resultId} {
+
+      allow read: if isLoggedIn()
+                  && (
+                        resource.data.studentId == request.auth.uid
+                        || isTeacher()
+                     );
+
+      allow create, update, delete: if isLoggedIn()
+                                    && isTeacher();
+    }
+
+    /* =========================
+       📅 ATTENDANCE
+    ==========================*/
+
+    match /attendance/{classroomId}/days/{date}/students/{studentId} {
+
+      allow read: if isLoggedIn()
+                  && (sameUser(studentId) || isTeacher());
+
+      // Student can confirm presence
+      allow create, update: if isLoggedIn()
+                            && sameUser(studentId)
+                            && isApprovedStudent();
+
+      // Teacher can verify
+      allow update: if isLoggedIn()
+                    && isTeacher();
+
+      allow delete: if false;
+    }
+
+    /* =========================
+       💬 CLASS CHAT (12h cleanup by Cloud Function)
+    ==========================*/
+
+    match /chats/{classroomId}/messages/{messageId} {
+
+      allow read: if isLoggedIn()
+                  && isApprovedStudent();
+
+      allow create: if isLoggedIn()
+                    && isApprovedStudent()
+                    && request.resource.data.senderId == request.auth.uid
+                    && request.resource.data.text is string
+                    && request.resource.data.text.size() < 1000;
+
+      allow update, delete: if false;
+    }
+
+    /* =========================
+       🔒 PRIVATE CHAT
+    ==========================*/
+
+    match /privateChats/{chatId}/messages/{messageId} {
+
+      allow read: if isLoggedIn();
+
+      allow create: if isLoggedIn()
+                    && request.resource.data.senderId == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+
+    /* =========================
+       🔔 NOTIFICATIONS
+    ==========================*/
+
+    match /notifications/{notificationId} {
+
+      allow read: if isLoggedIn()
+                  && resource.data.userId == request.auth.uid;
+
+      allow create: if isTeacher();
+
+      allow update, delete: if false;
+    }
+
+    /* =========================
+       🎉 EVENTS
+    ==========================*/
+
+    match /events/{eventId} {
+      allow read: if isLoggedIn();
+      allow create, update, delete: if isTeacher();
+    }
+
+    /* =========================
+       📢 PUBLICATIONS
+    ==========================*/
+
+    match /publications/{pubId} {
+      allow read: if isLoggedIn();
+      allow create, update, delete: if isTeacher();
+    }
+  }
+}

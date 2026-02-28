@@ -1,0 +1,1112 @@
+import express from "express";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import { createServer as createViteServer } from "vite";
+import Database from "better-sqlite3";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import path from "path";
+import { fileURLToPath } from "url";
+import multer from "multer";
+import fs from "fs";
+
+import nodemailer from "nodemailer";
+
+console.log("Server.ts is starting...");
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const db = new Database("platform.db");
+const JWT_SECRET = process.env.JWT_SECRET || "fshn-secret-key-2026";
+
+// Initialize Database
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT CHECK(role IN ('STUDENT', 'TEACHER')) NOT NULL,
+    program TEXT,
+    year TEXT,
+    is_confirmed BOOLEAN DEFAULT 0,
+    class_code TEXT,
+    profile_photo TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS password_resets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    token TEXT NOT NULL,
+    expires_at DATETIME NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS classes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    code TEXT UNIQUE NOT NULL,
+    teacher_id INTEGER,
+    FOREIGN KEY(teacher_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS attendance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    status TEXT CHECK(status IN ('PRESENT', 'ABSENT', 'OFFLINE')),
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS tests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    test_date DATETIME,
+    duration INTEGER, -- in minutes
+    total_points INTEGER,
+    program TEXT,
+    year TEXT,
+    teacher_id INTEGER,
+    status TEXT CHECK(status IN ('DRAFT', 'ACTIVE', 'IN_PROGRESS', 'COMPLETED', 'IN_GRADING', 'PUBLISHED')) DEFAULT 'DRAFT',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(teacher_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    test_id INTEGER,
+    content TEXT NOT NULL,
+    type TEXT CHECK(type IN ('MCQ', 'OPEN')),
+    options TEXT, -- JSON string for MCQ
+    correct_answer TEXT,
+    points INTEGER,
+    FOREIGN KEY(test_id) REFERENCES tests(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS test_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    test_id INTEGER,
+    user_id INTEGER,
+    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    end_time DATETIME,
+    status TEXT CHECK(status IN ('STARTED', 'SUBMITTED', 'GRADED')) DEFAULT 'STARTED',
+    total_score INTEGER DEFAULT 0,
+    grade INTEGER, -- Final grade 4-10
+    feedback TEXT,
+    FOREIGN KEY(test_id) REFERENCES tests(id),
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS test_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id INTEGER,
+    question_id INTEGER,
+    answer_text TEXT,
+    points_awarded INTEGER DEFAULT 0,
+    is_correct BOOLEAN,
+    FOREIGN KEY(attempt_id) REFERENCES test_attempts(id),
+    FOREIGN KEY(question_id) REFERENCES questions(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id INTEGER,
+    receiver_id INTEGER, -- NULL for class chat
+    chat_type TEXT CHECK(chat_type IN ('PRIVATE', 'CLASS', 'SCHOOL')) DEFAULT 'CLASS',
+    content TEXT NOT NULL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(sender_id) REFERENCES users(id),
+    FOREIGN KEY(receiver_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS live_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teacher_id INTEGER,
+    student_id INTEGER,
+    content TEXT NOT NULL,
+    answer TEXT,
+    score INTEGER,
+    status TEXT CHECK(status IN ('PENDING', 'CONFIRMED', 'ANSWERED', 'GRADED')) DEFAULT 'PENDING',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(teacher_id) REFERENCES users(id),
+    FOREIGN KEY(student_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    title TEXT NOT NULL,
+    content TEXT,
+    type TEXT,
+    is_read BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    deadline DATETIME,
+    materials TEXT, -- Links or descriptions of materials
+    max_points INTEGER DEFAULT 100,
+    submission_type TEXT CHECK(submission_type IN ('FILE', 'TEXT', 'BOTH')) DEFAULT 'BOTH',
+    status TEXT CHECK(status IN ('DRAFT', 'PUBLISHED', 'ARCHIVED')) DEFAULT 'DRAFT',
+    teacher_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(teacher_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    assignment_id INTEGER,
+    student_id INTEGER,
+    content TEXT,
+    file_path TEXT,
+    points INTEGER,
+    grade INTEGER, -- Final grade 4-10
+    feedback TEXT,
+    status TEXT CHECK(status IN ('SUBMITTED', 'PENDING', 'GRADED')) DEFAULT 'SUBMITTED',
+    is_late BOOLEAN DEFAULT 0,
+    submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    graded_at DATETIME,
+    FOREIGN KEY(assignment_id) REFERENCES assignments(id),
+    FOREIGN KEY(student_id) REFERENCES users(id)
+  );
+`);
+
+// Migration: Add missing columns if they don't exist
+const userColumns = db.prepare("PRAGMA table_info(users)").all() as any[];
+const userColumnNames = userColumns.map(c => c.name);
+if (!userColumnNames.includes('program')) db.prepare("ALTER TABLE users ADD COLUMN program TEXT").run();
+if (!userColumnNames.includes('year')) db.prepare("ALTER TABLE users ADD COLUMN year TEXT").run();
+if (!userColumnNames.includes('is_confirmed')) db.prepare("ALTER TABLE users ADD COLUMN is_confirmed BOOLEAN DEFAULT 0").run();
+if (!userColumnNames.includes('profile_photo')) db.prepare("ALTER TABLE users ADD COLUMN profile_photo TEXT").run();
+
+const testColumns = db.prepare("PRAGMA table_info(tests)").all() as any[];
+const testColumnNames = testColumns.map(c => c.name);
+if (!testColumnNames.includes('program')) db.prepare("ALTER TABLE tests ADD COLUMN program TEXT").run();
+if (!testColumnNames.includes('year')) db.prepare("ALTER TABLE tests ADD COLUMN year TEXT").run();
+
+const attemptColumns = db.prepare("PRAGMA table_info(test_attempts)").all() as any[];
+const attemptColumnNames = attemptColumns.map(c => c.name);
+if (!attemptColumnNames.includes('grade')) db.prepare("ALTER TABLE test_attempts ADD COLUMN grade INTEGER").run();
+
+const submissionColumns = db.prepare("PRAGMA table_info(submissions)").all() as any[];
+const submissionColumnNames = submissionColumns.map(c => c.name);
+if (!submissionColumnNames.includes('grade')) db.prepare("ALTER TABLE submissions ADD COLUMN grade INTEGER").run();
+
+const msgColumns = db.prepare("PRAGMA table_info(messages)").all() as any[];
+const msgColumnNames = msgColumns.map(c => c.name);
+if (!msgColumnNames.includes('chat_type')) db.prepare("ALTER TABLE messages ADD COLUMN chat_type TEXT CHECK(chat_type IN ('PRIVATE', 'CLASS', 'SCHOOL')) DEFAULT 'CLASS'").run();
+
+const columns = db.prepare("PRAGMA table_info(assignments)").all() as any[];
+const columnNames = columns.map(c => c.name);
+
+if (!columnNames.includes('materials')) {
+  db.prepare("ALTER TABLE assignments ADD COLUMN materials TEXT").run();
+}
+if (!columnNames.includes('max_points')) {
+  db.prepare("ALTER TABLE assignments ADD COLUMN max_points INTEGER DEFAULT 100").run();
+}
+if (!columnNames.includes('submission_type')) {
+  db.prepare("ALTER TABLE assignments ADD COLUMN submission_type TEXT CHECK(submission_type IN ('FILE', 'TEXT', 'BOTH')) DEFAULT 'BOTH'").run();
+}
+if (!columnNames.includes('status')) {
+  db.prepare("ALTER TABLE assignments ADD COLUMN status TEXT CHECK(status IN ('DRAFT', 'PUBLISHED', 'ARCHIVED')) DEFAULT 'DRAFT'").run();
+}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS study_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teacher_id INTEGER,
+    status TEXT CHECK(status IN ('ACTIVE', 'COMPLETED')) DEFAULT 'ACTIVE',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(teacher_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS session_presence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER,
+    user_id INTEGER,
+    is_verified BOOLEAN DEFAULT 0,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(session_id) REFERENCES study_sessions(id),
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teacher_id INTEGER,
+    day_of_week TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    program TEXT NOT NULL,
+    year TEXT NOT NULL,
+    building TEXT NOT NULL,
+    classroom TEXT NOT NULL,
+    FOREIGN KEY(teacher_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS performance_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    type TEXT CHECK(type IN ('TEST', 'ASSIGNMENT', 'ATTENDANCE')),
+    score REAL,
+    max_score REAL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+`);
+
+// Seed Data
+const seed = () => {
+  const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as any;
+  if (userCount.count === 0) {
+    const teacherPass = bcrypt.hashSync("mesuesi123", 10);
+    const studentPass = bcrypt.hashSync("nxenesi123", 10);
+
+    db.prepare("INSERT INTO users (name, email, password, role, is_confirmed, program, year) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+      "Prof. Arben Meta", "arben@fshn.edu.al", teacherPass, "TEACHER", 1, "Informatikë", "Viti 1"
+    );
+    db.prepare("INSERT INTO users (name, email, password, role, class_code, is_confirmed, program, year) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "Studenti Shembull", "student@fshnstudent.info", studentPass, "STUDENT", "FSHN-2026", 1, "Informatikë", "Viti 1"
+    );
+
+    db.prepare("INSERT INTO tests (title, description, duration, total_points, teacher_id, status, program, year, test_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "Testi i Parë në Analitikë", "Një vlerësim fillestar i njohurive mbi sistemet analitike.", 30, 100, 1, 'ACTIVE', 'Informatikë', 'Viti 1', '2026-03-10 10:00:00'
+    );
+
+    db.prepare("INSERT INTO questions (test_id, content, type, options, points, correct_answer) VALUES (?, ?, ?, ?, ?, ?)").run(
+      1, "Cila nga këto është një gjuhë programimi për analitikë?", "MCQ", JSON.stringify(["Python", "HTML", "CSS", "Photoshop"]), 50, "Python"
+    );
+    db.prepare("INSERT INTO questions (test_id, content, type, points) VALUES (?, ?, ?, ?)").run(
+      1, "Shpjegoni rëndësinë e analitikës në biznes.", "OPEN", 50
+    );
+
+    db.prepare("INSERT INTO assignments (title, description, deadline, teacher_id) VALUES (?, ?, ?, ?)").run(
+      "Detyra e Parë: Analiza e Regresionit", "Krijoni një raport mbi zbatimin e regresionit linear në të dhënat e shitjeve.", "2026-03-15 23:59:59", 1
+    );
+
+    db.prepare("INSERT INTO submissions (assignment_id, student_id, content) VALUES (?, ?, ?)").run(
+      1, 2, "Këtu është raporti im mbi regresionin linear. Kam përdorur metodën e katrorëve më të vegjël për të parashikuar shitjet e muajit të ardhshëm bazuar në trendet e kaluara."
+    );
+
+    // Seed Performance Logs
+    const students = db.prepare("SELECT id FROM users WHERE role = 'STUDENT'").all() as any[];
+    for (const student of students) {
+      db.prepare("INSERT INTO performance_logs (user_id, type, score, max_score, timestamp) VALUES (?, 'TEST', ?, 10, datetime('now', '-10 days'))")
+        .run(student.id, 7 + Math.floor(Math.random() * 4));
+      db.prepare("INSERT INTO performance_logs (user_id, type, score, max_score, timestamp) VALUES (?, 'ASSIGNMENT', ?, 10, datetime('now', '-5 days'))")
+        .run(student.id, 6 + Math.floor(Math.random() * 5));
+      db.prepare("INSERT INTO performance_logs (user_id, type, score, max_score, timestamp) VALUES (?, 'TEST', ?, 10, datetime('now', '-2 days'))")
+        .run(student.id, 8 + Math.floor(Math.random() * 3));
+    }
+  }
+  // Auto-confirm all existing users for development
+  db.prepare("UPDATE users SET is_confirmed = 1").run();
+};
+seed();
+
+async function startServer() {
+  const app = express();
+  
+  app.use((req, res, next) => {
+    const log = `${new Date().toISOString()} - ${req.method} ${req.url}\n`;
+    try {
+      fs.appendFileSync("request_logs.txt", log);
+    } catch (e) {}
+    console.log(`[EARLY] ${req.method} ${req.url}`);
+    next();
+  });
+
+  app.use(express.json());
+
+  const httpServer = createServer(app);
+
+  // Ensure uploads directory exists
+  const uploadDir = path.join(__dirname, "uploads");
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir);
+  }
+
+  // Multer configuration
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+      cb(null, uniqueSuffix + "-" + file.originalname);
+    },
+  });
+  const upload = multer({ storage });
+
+  app.use("/uploads", express.static(uploadDir));
+
+  const io = new Server(httpServer, {
+    cors: { origin: "*" }
+  });
+
+  app.get("/api/health", (req, res) => {
+    console.log("Health check request received");
+    res.json({ status: "ok", database: db.name });
+  });
+
+  // Auth Middleware
+  const authenticate = (req: any, res: any, next: any) => {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "Pa autorizuar" });
+    try {
+      req.user = jwt.verify(token, JWT_SECRET);
+      next();
+    } catch (err) {
+      res.status(401).json({ error: "Token i pavlefshëm" });
+    }
+  };
+
+  // Auth Routes
+  app.post("/api/auth/register", async (req, res) => {
+    const { name, email, password, role, program, year } = req.body;
+    
+    // Domain restriction
+    if (role === 'STUDENT' && !email.endsWith('@fshnstudent.info')) {
+      return res.status(400).json({ error: "Vetëm email-et @fshnstudent.info lejohen për studentët" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    try {
+      const info = db.prepare("INSERT INTO users (name, email, password, role, program, year, is_confirmed) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(name, email, hashedPassword, role, program, year, 1); // Set is_confirmed to 1 by default for now
+      res.json({ id: info.lastInsertRowid });
+    } catch (err: any) {
+      res.status(400).json({ error: "Email-i ekziston ose të dhëna të gabuara" });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    console.log(`[LOGIN] Request received for: ${req.body?.email}`);
+    try {
+      const { email, password } = req.body;
+      console.log("Login attempt for:", email);
+      const user: any = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+      if (!user) {
+        console.log("User not found:", email);
+        return res.status(401).json({ error: "Kredenciale të gabuara" });
+      }
+      
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        console.log("Invalid password for:", email);
+        return res.status(401).json({ error: "Kredenciale të gabuara" });
+      }
+      
+      if (!user.is_confirmed) {
+        console.log("User not confirmed:", email);
+        return res.status(401).json({ error: "Llogaria juaj ende nuk është konfirmuar nga mësuesi" });
+      }
+
+      const token = jwt.sign({ id: user.id, role: user.role, name: user.name }, JWT_SECRET);
+      console.log("Login successful for:", email);
+      res.json({ token, user: { id: user.id, name: user.name, role: user.role, email: user.email, program: user.program, year: user.year } });
+    } catch (err: any) {
+      console.error("Login error:", err);
+      res.status(500).json({ error: "Gabim i brendshëm i serverit: " + err.message });
+    }
+  });
+
+  app.post("/api/auth/firebase", async (req, res) => {
+    try {
+      const { email, name, uid } = req.body;
+      
+      // Check if user exists
+      let user: any = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+      
+      if (!user) {
+        return res.status(404).json({ 
+          error: "Llogaria nuk u gjet. Ju lutem regjistrohuni më parë duke zgjedhur degën dhe vitin tuaj.",
+          email: email,
+          name: name
+        });
+      }
+
+      const token = jwt.sign({ id: user.id, role: user.role, name: user.name }, JWT_SECRET);
+      res.json({ token, user: { id: user.id, name: user.name, role: user.role, email: user.email, program: user.program, year: user.year } });
+    } catch (err: any) {
+      console.error("Firebase Auth Error:", err);
+      res.status(500).json({ error: "Gabim gjatë autentikimit me Firebase: " + err.message });
+    }
+  });
+
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const { email } = req.body;
+      const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+      
+      if (!user) {
+        // We don't want to reveal if a user exists or not for security
+        return res.json({ message: "Nëse ky email ekziston, një link për rivendosjen e fjalëkalimit është dërguar." });
+      }
+
+      const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      const expiresAt = new Date(Date.now() + 3600000).toISOString(); // 1 hour
+
+      db.prepare("INSERT INTO password_resets (email, token, expires_at) VALUES (?, ?, ?)").run(email, token, expiresAt);
+
+      // Email configuration
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS
+        }
+      });
+
+      const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
+
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: 'Rivendosja e Fjalëkalimit - FSHN Student',
+        text: `Përshëndetje ${user.name},\n\nJu keni kërkuar të rivendosni fjalëkalimin tuaj. Ju lutem klikoni në linkun e mëposhtëm për të vazhduar:\n\n${resetUrl}\n\nKy link do të skadojë pas 1 ore.\n\nNëse nuk e keni kërkuar këtë, ju lutem injoroni këtë email.`
+      };
+
+      // If no credentials, just log the token for development
+      if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        console.log("--- MOCK EMAIL SENT ---");
+        console.log("To:", email);
+        console.log("Reset URL:", resetUrl);
+        console.log("-----------------------");
+      } else {
+        await transporter.sendMail(mailOptions);
+      }
+
+      res.json({ message: "Nëse ky email ekziston, një link për rivendosjen e fjalëkalimit është dërguar." });
+    } catch (err: any) {
+      console.error("Forgot password error:", err);
+      res.status(500).json({ error: "Gabim i brendshëm: " + err.message });
+    }
+  });
+
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const { token, newPassword } = req.body;
+      const resetRequest: any = db.prepare("SELECT * FROM password_resets WHERE token = ? AND expires_at > ?").get(token, new Date().toISOString());
+
+      if (!resetRequest) {
+        return res.status(400).json({ error: "Token i pavlefshëm ose i skaduar" });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      db.prepare("UPDATE users SET password = ? WHERE email = ?").run(hashedPassword, resetRequest.email);
+      db.prepare("DELETE FROM password_resets WHERE email = ?").run(resetRequest.email);
+
+      res.json({ message: "Fjalëkalimi u ndryshua me sukses" });
+    } catch (err: any) {
+      console.error("Reset password error:", err);
+      res.status(500).json({ error: "Gabim i brendshëm: " + err.message });
+    }
+  });
+
+  // Teacher confirmation routes
+  app.get("/api/teacher/pending-students", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    const students = db.prepare("SELECT id, name, email, program, year FROM users WHERE role = 'STUDENT' AND is_confirmed = 0").all();
+    res.json(students);
+  });
+
+  app.post("/api/teacher/confirm-student", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    const { studentId } = req.body;
+    db.prepare("UPDATE users SET is_confirmed = 1 WHERE id = ?").run(studentId);
+    res.json({ success: true });
+  });
+
+  // User Profile & Stats
+  app.get("/api/user/me", authenticate, (req: any, res) => {
+    const user = db.prepare("SELECT id, name, email, role, class_code, program, year, profile_photo FROM users WHERE id = ?").get(req.user.id);
+    res.json(user);
+  });
+
+  app.post("/api/user/profile-photo", authenticate, upload.single('photo'), (req: any, res) => {
+    if (!req.file) return res.status(400).json({ error: "Nuk u ngarkua asnjë foto" });
+    const photoPath = `/uploads/${req.file.filename}`;
+    db.prepare("UPDATE users SET profile_photo = ? WHERE id = ?").run(photoPath, req.user.id);
+    res.json({ photoPath });
+  });
+
+  // Study Sessions
+  app.post("/api/study/start", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    const info = db.prepare("INSERT INTO study_sessions (teacher_id) VALUES (?)").run(req.user.id);
+    io.emit("study_session_start", { sessionId: info.lastInsertRowid });
+    res.json({ sessionId: info.lastInsertRowid });
+  });
+
+  app.post("/api/study/confirm", authenticate, (req: any, res) => {
+    const { sessionId } = req.body;
+    db.prepare("INSERT INTO session_presence (session_id, user_id) VALUES (?, ?)").run(sessionId, req.user.id);
+    io.emit("presence_confirmed", { sessionId, userId: req.user.id, userName: req.user.name });
+    res.json({ success: true });
+  });
+
+  app.post("/api/study/verify", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    const { sessionId, userId } = req.body;
+    db.prepare("UPDATE session_presence SET is_verified = 1 WHERE session_id = ? AND user_id = ?").run(sessionId, userId);
+    
+    // Log to attendance
+    db.prepare("INSERT INTO attendance (user_id, status) VALUES (?, 'PRESENT')").run(userId);
+    
+    io.emit("presence_verified", { sessionId, userId });
+    res.json({ success: true });
+  });
+
+  app.get("/api/study/active", authenticate, (req: any, res) => {
+    const session = db.prepare("SELECT * FROM study_sessions WHERE status = 'ACTIVE' ORDER BY created_at DESC LIMIT 1").get();
+    if (!session) return res.json(null);
+    
+    const presence = db.prepare(`
+      SELECT sp.*, u.name as userName 
+      FROM session_presence sp 
+      JOIN users u ON sp.user_id = u.id 
+      WHERE sp.session_id = ?
+    `).all(session.id);
+    
+    res.json({ ...session, presence });
+  });
+
+  app.get("/api/attendance/stats", authenticate, (req: any, res) => {
+    const stats = db.prepare(`
+      SELECT status, COUNT(*) as count 
+      FROM attendance 
+      WHERE user_id = ? 
+      GROUP BY status
+    `).all(req.user.id);
+    res.json(stats);
+  });
+
+  // Tests
+  app.get("/api/tests", authenticate, (req: any, res) => {
+    let tests;
+    if (req.user.role === 'TEACHER') {
+      tests = db.prepare("SELECT * FROM tests WHERE teacher_id = ? ORDER BY created_at DESC").all(req.user.id);
+    } else {
+      tests = db.prepare("SELECT * FROM tests WHERE status IN ('ACTIVE', 'IN_PROGRESS', 'PUBLISHED') ORDER BY created_at DESC").all();
+    }
+    res.json(tests);
+  });
+
+  app.post("/api/tests", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të krijojnë teste" });
+    const { title, description, duration, totalPoints, testDate, program, year } = req.body;
+    const info = db.prepare("INSERT INTO tests (title, description, duration, total_points, teacher_id, test_date, program, year, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')")
+      .run(title, description, duration, totalPoints, req.user.id, testDate, program, year);
+    
+    // Notify students of this program and year
+    const students = db.prepare("SELECT id FROM users WHERE role = 'STUDENT' AND program = ? AND year = ?").all(program, year) as any[];
+    for (const student of students) {
+      db.prepare("INSERT INTO notifications (user_id, title, content, type) VALUES (?, ?, ?, 'TEST')")
+        .run(student.id, "Test i Ri: " + title, `Mësuesi ${req.user.name} ka caktuar një test për datën ${testDate}.`, 'TEST');
+    }
+
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  app.patch("/api/tests/:id/status", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të ndryshojnë statusin" });
+    const { status } = req.body;
+    db.prepare("UPDATE tests SET status = ? WHERE id = ?").run(status, req.params.id);
+    
+    if (status === 'ACTIVE') {
+      io.emit("test_distributed", { testId: req.params.id, title: "Test i ri u shpërnda!" });
+    }
+    
+    res.json({ success: true });
+  });
+
+  app.get("/api/tests/:id", authenticate, (req: any, res) => {
+    const test = db.prepare("SELECT * FROM tests WHERE id = ?").get(req.params.id);
+    res.json(test);
+  });
+
+  // Questions
+  app.get("/api/tests/:id/questions", authenticate, (req, res) => {
+    const questions = db.prepare("SELECT id, content, type, options, points, correct_answer FROM questions WHERE test_id = ?").all(req.params.id);
+    res.json(questions);
+  });
+
+  app.post("/api/tests/:id/questions", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të shtojnë pyetje" });
+    const { content, type, options, points, correct_answer } = req.body;
+    const info = db.prepare("INSERT INTO questions (test_id, content, type, options, points, correct_answer) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(req.params.id, content, type, options ? JSON.stringify(options) : null, points, correct_answer);
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  // Test Attempts & Participation
+  app.post("/api/tests/:id/join", authenticate, (req: any, res) => {
+    if (req.user.role !== 'STUDENT') return res.status(403).json({ error: "Vetëm studentët mund të hyjnë në test" });
+    
+    // Check if already joined
+    const existing = db.prepare("SELECT * FROM test_attempts WHERE test_id = ? AND user_id = ?").get(req.params.id, req.user.id);
+    if (existing) return res.json(existing);
+
+    const info = db.prepare("INSERT INTO test_attempts (test_id, user_id) VALUES (?, ?)")
+      .run(req.params.id, req.user.id);
+    
+    const attempt = { id: info.lastInsertRowid, test_id: req.params.id, user_id: req.user.id, status: 'STARTED' };
+    io.emit("student_joined_test", { testId: req.params.id, studentName: req.user.name, userId: req.user.id });
+    
+    res.json(attempt);
+  });
+
+  app.post("/api/attempts/:id/save", authenticate, (req: any, res) => {
+    const { answers } = req.body; // Array of { questionId, answerText }
+    
+    db.transaction(() => {
+      for (const ans of answers) {
+        const existing = db.prepare("SELECT id FROM test_answers WHERE attempt_id = ? AND question_id = ?")
+          .get(req.params.id, ans.questionId) as any;
+        
+        if (existing) {
+          db.prepare("UPDATE test_answers SET answer_text = ? WHERE id = ?")
+            .run(ans.answerText, existing.id);
+        } else {
+          db.prepare("INSERT INTO test_answers (attempt_id, question_id, answer_text) VALUES (?, ?, ?)")
+            .run(req.params.id, ans.questionId, ans.answerText);
+        }
+      }
+    })();
+    
+    res.json({ success: true });
+  });
+
+  app.post("/api/attempts/:id/submit", authenticate, (req: any, res) => {
+    db.prepare("UPDATE test_attempts SET status = 'SUBMITTED', end_time = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(req.params.id);
+    
+    const attempt = db.prepare("SELECT test_id FROM test_attempts WHERE id = ?").get(req.params.id) as any;
+    io.emit("student_submitted_test", { testId: attempt.test_id, studentName: req.user.name, userId: req.user.id });
+    
+    res.json({ success: true });
+  });
+
+  app.get("/api/tests/:id/monitoring", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të monitorojnë" });
+    
+    const participants = db.prepare(`
+      SELECT u.name, ta.status, ta.start_time, ta.end_time, ta.id as attempt_id
+      FROM test_attempts ta
+      JOIN users u ON ta.user_id = u.id
+      WHERE ta.test_id = ?
+    `).all(req.params.id);
+    
+    res.json(participants);
+  });
+
+  app.get("/api/attempts/:id/details", authenticate, (req: any, res) => {
+    const attempt = db.prepare(`
+      SELECT ta.*, u.name as student_name, t.title as test_title
+      FROM test_attempts ta
+      JOIN users u ON ta.user_id = u.id
+      JOIN tests t ON ta.test_id = t.id
+      WHERE ta.id = ?
+    `).get(req.params.id);
+
+    const answers = db.prepare(`
+      SELECT ta.*, q.content as question_text, q.type as question_type, q.options, q.points as max_points, q.correct_answer
+      FROM test_answers ta
+      JOIN questions q ON ta.question_id = q.id
+      WHERE ta.attempt_id = ?
+    `).all(req.params.id);
+
+    res.json({ attempt, answers });
+  });
+
+  app.post("/api/attempts/:id/grade", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të vlerësojnë" });
+    const { grades, feedback, finalGrade } = req.body; // Array of { answerId, points, isCorrect }, finalGrade 4-10
+    
+    let totalScore = 0;
+    db.transaction(() => {
+      for (const g of grades) {
+        db.prepare("UPDATE test_answers SET points_awarded = ?, is_correct = ? WHERE id = ?")
+          .run(g.points, g.isCorrect ? 1 : 0, g.answerId);
+        totalScore += g.points;
+      }
+      db.prepare("UPDATE test_attempts SET total_score = ?, grade = ?, status = 'GRADED', feedback = ? WHERE id = ?")
+        .run(totalScore, finalGrade, feedback, req.params.id);
+      
+      const attempt = db.prepare(`
+        SELECT ta.user_id, t.total_points, t.title, t.teacher_id, u.name as teacher_name
+        FROM test_attempts ta 
+        JOIN tests t ON ta.test_id = t.id 
+        JOIN users u ON t.teacher_id = u.id
+        WHERE ta.id = ?
+      `).get(req.params.id) as any;
+
+      if (attempt) {
+        // Log to performance using the 4-10 grade
+        db.prepare("INSERT INTO performance_logs (user_id, type, score, max_score) VALUES (?, 'TEST', ?, 10)")
+          .run(attempt.user_id, finalGrade, 10);
+        
+        // Notify student
+        db.prepare("INSERT INTO notifications (user_id, title, content, type) VALUES (?, ?, ?, 'GRADE')")
+          .run(attempt.user_id, "Rezultati i Testit: " + attempt.title, `Mësuesi ${attempt.teacher_name} ju ka vlerësuar me notën ${finalGrade}.`, 'GRADE');
+      }
+    })();
+    
+    res.json({ success: true, totalScore });
+  });
+
+  app.get("/api/tests/:id/analytics", authenticate, (req: any, res) => {
+    const attempts = db.prepare("SELECT total_score FROM test_attempts WHERE test_id = ? AND status = 'GRADED'").all(req.params.id) as any[];
+    const test = db.prepare("SELECT total_points FROM tests WHERE id = ?").get(req.params.id) as any;
+    
+    if (attempts.length === 0) return res.json({ message: "Nuk ka të dhëna për analizë" });
+
+    const scores = attempts.map(a => a.total_score);
+    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const passRate = (scores.filter(s => s >= test.total_points * 0.4).length / scores.length) * 100;
+
+    res.json({
+      averageScore: avg,
+      passRate,
+      totalAttempts: attempts.length,
+      distribution: scores
+    });
+  });
+
+  app.get("/api/analytics/student/:id", authenticate, (req: any, res) => {
+    const userId = req.params.id === 'me' ? req.user.id : req.params.id;
+    
+    const logs = db.prepare(`
+      SELECT type, score, max_score, timestamp 
+      FROM performance_logs 
+      WHERE user_id = ? 
+      ORDER BY timestamp ASC
+    `).all(userId);
+
+    const attendance = db.prepare(`
+      SELECT status, COUNT(*) as count 
+      FROM attendance 
+      WHERE user_id = ? 
+      GROUP BY status
+    `).all(userId);
+
+    res.json({ logs, attendance });
+  });
+
+  app.get("/api/analytics/class", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të shohin analitikën e klasës" });
+    
+    const topImprovers = db.prepare(`
+      SELECT u.name, AVG(score/max_score) as avg_perf
+      FROM performance_logs pl
+      JOIN users u ON pl.user_id = u.id
+      GROUP BY user_id
+      ORDER BY avg_perf DESC
+      LIMIT 5
+    `).all();
+
+    const classProgress = db.prepare(`
+      SELECT strftime('%Y-%m', timestamp) as month, AVG(score/max_score) as avg_perf
+      FROM performance_logs
+      GROUP BY month
+      ORDER BY month ASC
+    `).all();
+
+    res.json({ topImprovers, classProgress });
+  });
+
+  app.delete("/api/questions/:id", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    db.prepare("DELETE FROM questions WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  });
+
+  // Live Questions
+  app.get("/api/live-questions", authenticate, (req: any, res) => {
+    const questions = db.prepare(`
+      SELECT lq.*, u.name as student_name 
+      FROM live_questions lq 
+      JOIN users u ON lq.student_id = u.id 
+      ORDER BY lq.created_at DESC
+    `).all();
+    res.json(questions);
+  });
+
+  app.post("/api/live-questions", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    const { content } = req.body;
+    
+    // Auto-select random student
+    const student = db.prepare("SELECT id, name FROM users WHERE role = 'STUDENT' AND is_confirmed = 1 ORDER BY RANDOM() LIMIT 1").get() as any;
+    if (!student) return res.status(400).json({ error: "Nuk ka studentë të konfirmuar në klasë" });
+
+    const info = db.prepare("INSERT INTO live_questions (teacher_id, student_id, content) VALUES (?, ?, ?)")
+      .run(req.user.id, student.id, content);
+    
+    const question = {
+      id: info.lastInsertRowid,
+      content,
+      student_id: student.id,
+      student_name: student.name,
+      status: 'PENDING'
+    };
+
+    io.emit("new_live_question", question);
+    res.json(question);
+  });
+
+  app.post("/api/live-questions/:id/confirm", authenticate, (req: any, res) => {
+    const question = db.prepare("SELECT * FROM live_questions WHERE id = ?").get(req.params.id) as any;
+    if (question.student_id !== req.user.id) return res.status(403).json({ error: "Pa autorizuar" });
+    
+    db.prepare("UPDATE live_questions SET status = 'CONFIRMED' WHERE id = ?").run(req.params.id);
+    const updated = { ...question, status: 'CONFIRMED' };
+    io.emit("live_question_update", updated);
+    res.json(updated);
+  });
+
+  app.post("/api/live-questions/:id/answer", authenticate, (req: any, res) => {
+    const { answer } = req.body;
+    const question = db.prepare("SELECT * FROM live_questions WHERE id = ?").get(req.params.id) as any;
+    if (question.student_id !== req.user.id) return res.status(403).json({ error: "Pa autorizuar" });
+    
+    db.prepare("UPDATE live_questions SET answer = ?, status = 'ANSWERED' WHERE id = ?").run(answer, req.params.id);
+    const updated = { ...question, answer, status: 'ANSWERED' };
+    io.emit("live_question_update", updated);
+    res.json(updated);
+  });
+
+  app.post("/api/live-questions/:id/grade", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    const { score } = req.body;
+    
+    db.prepare("UPDATE live_questions SET score = ?, status = 'GRADED' WHERE id = ?").run(score, req.params.id);
+    const question = db.prepare("SELECT * FROM live_questions WHERE id = ?").get(req.params.id) as any;
+    
+    // Log to performance
+    db.prepare("INSERT INTO performance_logs (user_id, type, score, max_score) VALUES (?, 'TEST', ?, 100)")
+      .run(question.student_id, score);
+
+    io.emit("live_question_update", { ...question, score, status: 'GRADED' });
+    res.json({ success: true });
+  });
+
+  // Notifications
+  app.get("/api/notifications", authenticate, (req: any, res) => {
+    const notifications = db.prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC").all(req.user.id);
+    res.json(notifications);
+  });
+
+  // Assignments
+  app.get("/api/assignments", authenticate, (req: any, res) => {
+    const assignments = db.prepare(`
+      SELECT a.*, u.name as teacher_name 
+      FROM assignments a 
+      JOIN users u ON a.teacher_id = u.id
+    `).all();
+    res.json(assignments);
+  });
+
+  app.post("/api/assignments", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të krijojnë detyra" });
+    const { title, description, deadline, materials, maxPoints, submissionType, status } = req.body;
+    const info = db.prepare("INSERT INTO assignments (title, description, deadline, materials, max_points, submission_type, status, teacher_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(title, description, deadline, materials, maxPoints || 100, submissionType || 'BOTH', status || 'DRAFT', req.user.id);
+    
+    if (status === 'PUBLISHED') {
+      io.emit("new_assignment", { title, teacherName: req.user.name });
+    }
+    
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  app.post("/api/assignments/:id/submit", authenticate, upload.single('file'), (req: any, res) => {
+    if (req.user.role !== 'STUDENT') return res.status(403).json({ error: "Vetëm studentët mund të dorëzojnë detyra" });
+    const { content } = req.body;
+    const filePath = req.file ? `/uploads/${req.file.filename}` : null;
+    
+    const assignment = db.prepare("SELECT deadline FROM assignments WHERE id = ?").get(req.params.id) as any;
+    const isLate = assignment && new Date() > new Date(assignment.deadline) ? 1 : 0;
+
+    const info = db.prepare("INSERT INTO submissions (assignment_id, student_id, content, file_path, is_late, status) VALUES (?, ?, ?, ?, ?, 'SUBMITTED')")
+      .run(req.params.id, req.user.id, content || "", filePath, isLate);
+    
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  app.use("/uploads", express.static(uploadDir));
+
+  // Chat
+  app.get("/api/chat/messages", authenticate, (req: any, res) => {
+    const { type } = req.query;
+    // Auto-delete logic: only return messages from the last 12 hours for CLASS and SCHOOL chats
+    const messages = db.prepare(`
+      SELECT m.*, u.name as senderName 
+      FROM messages m 
+      JOIN users u ON m.sender_id = u.id 
+      WHERE m.chat_type = ? 
+      AND m.timestamp > datetime('now', '-12 hours')
+      ORDER BY m.timestamp ASC
+    `).all(type || 'CLASS');
+    res.json(messages);
+  });
+
+  app.get("/api/assignments/:id/submissions", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të shohin dorëzimet" });
+    const submissions = db.prepare(`
+      SELECT s.*, u.name as student_name 
+      FROM submissions s 
+      JOIN users u ON s.student_id = u.id 
+      WHERE s.assignment_id = ?
+    `).all(req.params.id);
+    res.json(submissions);
+  });
+
+  app.post("/api/submissions/:id/grade", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të vlerësojnë" });
+    const { points, feedback, grade } = req.body; // grade 4-10
+    
+    db.transaction(() => {
+      db.prepare("UPDATE submissions SET points = ?, grade = ?, feedback = ?, status = 'GRADED', graded_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .run(points, grade, feedback, req.params.id);
+      
+      const sub = db.prepare(`
+        SELECT s.student_id, a.max_points, a.title, u.name as teacher_name
+        FROM submissions s 
+        JOIN assignments a ON s.assignment_id = a.id 
+        JOIN users u ON a.teacher_id = u.id
+        WHERE s.id = ?
+      `).get(req.params.id) as any;
+
+      if (sub) {
+        // Log to performance using the 4-10 grade
+        db.prepare("INSERT INTO performance_logs (user_id, type, score, max_score) VALUES (?, 'ASSIGNMENT', ?, 10)")
+          .run(sub.student_id, grade, 10);
+
+        // Notify student
+        db.prepare("INSERT INTO notifications (user_id, title, content, type) VALUES (?, ?, ?, 'GRADE')")
+          .run(sub.student_id, "Vlerësim Detyre: " + sub.title, `Mësuesi ${sub.teacher_name} ju ka vlerësuar me notën ${grade}.`, 'GRADE');
+      }
+    })();
+    
+    res.json({ success: true });
+  });
+
+  app.get("/api/my-submissions", authenticate, (req: any, res) => {
+    const submissions = db.prepare(`
+      SELECT s.*, a.title as assignment_title 
+      FROM submissions s 
+      JOIN assignments a ON s.assignment_id = a.id 
+      WHERE s.student_id = ?
+    `).all(req.user.id);
+    res.json(submissions);
+  });
+
+  // Schedules
+  app.get("/api/schedules", authenticate, (req: any, res) => {
+    let schedules;
+    if (req.user.role === 'TEACHER') {
+      schedules = db.prepare("SELECT * FROM schedules WHERE teacher_id = ?").all(req.user.id);
+    } else {
+      // For students, filter by their program and year
+      const user = db.prepare("SELECT program, year FROM users WHERE id = ?").get(req.user.id) as any;
+      schedules = db.prepare(`
+        SELECT s.*, u.name as teacher_name 
+        FROM schedules s 
+        JOIN users u ON s.teacher_id = u.id 
+        WHERE s.program = ? AND s.year = ?
+      `).all(user.program, user.year);
+    }
+    res.json(schedules);
+  });
+
+  app.post("/api/schedules", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    const { day_of_week, start_time, end_time, program, year, building, classroom } = req.body;
+    const info = db.prepare(`
+      INSERT INTO schedules (teacher_id, day_of_week, start_time, end_time, program, year, building, classroom) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.user.id, day_of_week, start_time, end_time, program, year, building, classroom);
+    res.json({ id: info.lastInsertRowid });
+  });
+
+  app.delete("/api/schedules/:id", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    db.prepare("DELETE FROM schedules WHERE id = ? AND teacher_id = ?").run(req.params.id, req.user.id);
+    res.json({ success: true });
+  });
+
+  // API 404 Handler
+  app.all("/api/*", (req, res) => {
+    console.log(`[API 404] ${req.method} ${req.url}`);
+    res.status(404).json({ error: `Rruga API nuk u gjet: ${req.method} ${req.url}` });
+  });
+
+  // Global error handler (should be after routes)
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("GLOBAL ERROR:", err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    res.status(500).json({ error: "Gabim i brendshëm i serverit: " + err.message });
+  });
+
+  app.use((req, res, next) => {
+    if (req.url.startsWith('/api')) {
+      console.log(`[API FALLTHROUGH] ${req.method} ${req.url}`);
+    }
+    next();
+  });
+
+  // Socket.io Logic
+  const onlineUsers = new Map();
+
+  io.on("connection", (socket) => {
+    socket.on("join", (userData) => {
+      onlineUsers.set(socket.id, userData);
+      io.emit("user_status", Array.from(onlineUsers.values()));
+    });
+
+    socket.on("send_message", (msg) => {
+      db.prepare("INSERT INTO messages (sender_id, content, chat_type) VALUES (?, ?, ?)")
+        .run(msg.senderId, msg.content, msg.chatType || 'CLASS');
+      io.emit("new_message", msg);
+    });
+
+    socket.on("disconnect", () => {
+      onlineUsers.delete(socket.id);
+      io.emit("user_status", Array.from(onlineUsers.values()));
+    });
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.join(__dirname, "dist")));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(__dirname, "dist", "index.html"));
+    });
+  }
+
+  const PORT = 3000;
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer().catch(err => {
+  console.error("FATAL ERROR starting server:", err);
+  process.exit(1);
+});
