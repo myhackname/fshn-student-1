@@ -18,7 +18,18 @@ import {
   Menu,
   Monitor,
   X,
-  Bell
+  Bell,
+  Eye,
+  EyeOff,
+  Search,
+  Plus,
+  ChevronRight,
+  Download,
+  Video,
+  Mic,
+  MicOff,
+  VideoOff,
+  ScreenShare as ScreenShareIcon
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { User, Role } from './types';
@@ -31,6 +42,7 @@ import Assignments from './components/Assignments';
 import LiveQuestions from './components/LiveQuestions';
 import ScreenShare from './components/ScreenShare';
 import Calendar from './components/Calendar';
+import Library from './components/Library';
 
 import { auth, googleProvider } from './firebase';
 import { signInWithPopup } from 'firebase/auth';
@@ -59,6 +71,7 @@ const Sidebar = ({ role }: { role: Role }) => {
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
     { icon: Users, label: 'Pjesëmarrja', path: '/attendance' },
     { icon: CalendarIcon, label: 'Kalendari', path: '/calendar' },
+    { icon: BookOpen, label: 'Libraria', path: '/library' },
     { icon: FileText, label: 'Teste', path: '/tests' },
     { icon: BookOpen, label: 'Detyra', path: '/assignments' },
     { icon: HelpCircle, label: 'Pyetje Live', path: '/live-questions' },
@@ -70,7 +83,8 @@ const Sidebar = ({ role }: { role: Role }) => {
   return (
     <div className="w-64 bg-slate-900 text-white h-screen fixed left-0 top-0 flex flex-col">
       <div className="p-6 border-b border-slate-800">
-        <h1 className="text-xl font-bold tracking-tight text-blue-400">FSHN ANALISTIKE</h1>
+        <h1 className="text-xl font-bold tracking-tight text-blue-400">DIGITAL STUDENT FSHN</h1>
+        <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">Platforma Studentore</p>
       </div>
       <nav className="flex-1 p-4 space-y-2">
         {menuItems.map((item) => (
@@ -98,32 +112,8 @@ const Sidebar = ({ role }: { role: Role }) => {
 };
 
 const Header = () => {
-  const { user, logout, token, refreshUser } = useAuth();
-  const [uploading, setUploading] = useState(false);
-
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('photo', file);
-
-    try {
-      const res = await fetch('/api/user/profile-photo', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData
-      });
-      if (res.ok) {
-        await refreshUser();
-      }
-    } catch (error) {
-      console.error("Error uploading photo:", error);
-    } finally {
-      setUploading(false);
-    }
-  };
+  const { user, logout } = useAuth();
+  const logoUrl = "https://i.ibb.co/LdsTzhWj/IMG-3202.png";
 
   return (
     <header className="h-16 bg-white border-b border-slate-200 fixed top-0 right-0 left-0 md:left-64 z-10 flex items-center justify-between px-4 md:px-8">
@@ -137,21 +127,17 @@ const Header = () => {
         </button>
         
         <div className="flex items-center space-x-3 border-l border-slate-100 pl-4">
-          <label className="relative cursor-pointer group">
-            <input type="file" className="hidden" onChange={handlePhotoUpload} accept="image/*" disabled={uploading} />
-            <div className="w-8 h-8 md:w-10 md:h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xs md:text-base overflow-hidden border-2 border-transparent group-hover:border-blue-400 transition-all">
-              {user?.profile_photo ? (
-                <img src={user.profile_photo} alt={user.name} className="w-full h-full object-cover" />
-              ) : (
-                user?.name?.[0]
-              )}
-              {uploading && (
-                <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              )}
+          <Link to="/profile" className="flex items-center space-x-3 group">
+            <div className="text-right hidden sm:block">
+              <p className="text-sm font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{user?.name} {user?.surname}</p>
+              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">{user?.role}</p>
             </div>
-          </label>
+            <div className="relative">
+              <div className="w-8 h-8 md:w-10 md:h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xs md:text-base overflow-hidden border-2 border-transparent group-hover:border-blue-400 transition-all">
+                <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
+              </div>
+            </div>
+          </Link>
           <button 
             onClick={logout}
             className="flex items-center space-x-1 md:space-x-2 px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors text-xs md:text-sm font-medium"
@@ -172,6 +158,7 @@ const LoginPage = () => {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -186,9 +173,6 @@ const LoginPage = () => {
         body: JSON.stringify({ email, password }),
       });
       
-      console.log("Login response status:", res.status);
-      console.log("Login response headers:", Object.fromEntries(res.headers.entries()));
-      
       const contentType = res.headers.get("content-type");
       if (contentType && contentType.indexOf("application/json") !== -1) {
         const data = await res.json();
@@ -200,12 +184,10 @@ const LoginPage = () => {
         }
       } else {
         const text = await res.text();
-        console.error("Non-JSON response:", text);
-        setError(`Serveri u përgjigj me statusin ${res.status} dhe format të gabuar (Jo-JSON). Fillimi: ${text.substring(0, 50)}...`);
+        setError(`Serveri u përgjigj me gabim.`);
       }
     } catch (err) {
-      console.error("Login fetch error:", err);
-      setError('Gabim në lidhje me serverin. Ju lutem provoni përsëri.');
+      setError('Gabim në lidhje me serverin.');
     } finally {
       setLoading(false);
     }
@@ -233,18 +215,14 @@ const LoginPage = () => {
           login(data.token, data.user);
           navigate('/');
         } else if (res.status === 404) {
-          // Redirect to register with pre-filled data
           navigate('/register', { state: { email: user.email, name: user.displayName } });
         } else {
           setError(data.error || 'Gabim gjatë hyrjes me Google');
         }
       } else {
-        const text = await res.text();
-        console.error("Non-JSON response from firebase auth:", text);
-        setError('Serveri u përgjigj me një format të gabuar. Ju lutem provoni përsëri.');
+        setError('Serveri u përgjigj me një format të gabuar.');
       }
     } catch (err: any) {
-      console.error(err);
       setError('Gabim gjatë hyrjes me Google: ' + err.message);
     }
   };
@@ -258,10 +236,10 @@ const LoginPage = () => {
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md w-full bg-white/60 rounded-2xl shadow-2xl p-8 relative z-10 border border-white/20"
+        className="max-w-md w-full bg-white/60 rounded-2xl shadow-2xl p-8 relative z-10 border border-white/20 backdrop-blur-md"
       >
-        <h1 className="text-2xl font-bold text-center text-slate-900 mb-2">STUDENTËT FSHN</h1>
-        <p className="text-center text-slate-500 mb-8">Hyni në platformën tuaj analitike</p>
+        <h1 className="text-2xl font-bold text-center text-slate-900 mb-2 uppercase tracking-tight">DIGITAL STUDENT FSHN</h1>
+        <p className="text-center text-slate-600 font-medium mb-8">Platforma Studentore</p>
         
         {error && <div className="bg-red-50/80 text-red-600 p-3 rounded-lg mb-6 text-sm border border-red-100 backdrop-blur-sm">{error}</div>}
         
@@ -272,25 +250,34 @@ const LoginPage = () => {
               type="email" 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
               placeholder="emri@fshn.edu.al"
               required
             />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Fjalëkalimi</label>
-            <input 
-              type="password" 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="••••••••"
-              required
-            />
+            <div className="relative">
+              <input 
+                type={showPassword ? "text" : "password"} 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                placeholder="••••••••"
+                required
+              />
+              <button 
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
+            </div>
           </div>
           <button 
             disabled={loading}
-            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 shadow-lg shadow-blue-200"
           >
             {loading ? 'Duke hyrë...' : 'Hyr'}
           </button>
@@ -513,13 +500,47 @@ const RegisterPage = () => {
   const location = useLocation();
   const [formData, setFormData] = useState({
     name: location.state?.name || '',
+    surname: '',
     email: location.state?.email || '',
     password: '',
     role: 'STUDENT' as Role,
     program: 'BIOLOGJI',
-    year: 'VITI 1 BACHELORE'
+    year: 'VITI 1 BACHELORE',
+    group_name: 'A',
+    study_type: 'BACHELOR',
+    phone: '',
+    is_president: false
   });
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [hasAdmin, setHasAdmin] = useState(false);
+
+  useEffect(() => {
+    if (formData.role === 'STUDENT') {
+      checkAdminStatus();
+    }
+  }, [formData.program, formData.year, formData.study_type, formData.group_name, formData.role]);
+
+  const checkAdminStatus = async () => {
+    try {
+      const params = new URLSearchParams({
+        program: formData.program,
+        year: formData.year,
+        study_type: formData.study_type,
+        group_name: formData.group_name
+      });
+      const res = await fetch(`/api/auth/check-class-admin?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setHasAdmin(data.hasAdmin);
+        if (data.hasAdmin) {
+          setFormData(prev => ({ ...prev, is_president: false }));
+        }
+      }
+    } catch (e) {
+      console.error("Error checking admin status:", e);
+    }
+  };
 
   const programs = [
     "BIOLOGJI", "BIOTEKNOLOGJI", "KIMI", "KIMI INDUSTRIALE DHE MJEDISORE",
@@ -570,27 +591,39 @@ const RegisterPage = () => {
         animate={{ opacity: 1, y: 0 }}
         className="max-w-md w-full bg-white/60 rounded-2xl shadow-2xl p-8 relative z-10 border border-white/20"
       >
-        <h1 className="text-2xl font-bold text-center text-slate-900 mb-2">Regjistrimi</h1>
-        <p className="text-center text-slate-500 mb-8">Krijoni llogarinë tuaj të re</p>
+        <h1 className="text-2xl font-bold text-center text-slate-900 mb-2 uppercase tracking-tight">Regjistrimi</h1>
+        <p className="text-center text-slate-600 font-medium mb-8">DIGITAL STUDENT FSHN</p>
         
         {location.state?.email && (
           <div className="bg-blue-50/80 text-blue-700 p-3 rounded-lg mb-6 text-sm border border-blue-100 backdrop-blur-sm">
-            Ju jeni lidhur me Google ({location.state.email}). Ju lutem plotësoni të dhënat e mëposhtme për të përfunduar regjistrimin.
+            Ju jeni lidhur me Google ({location.state.email}).
           </div>
         )}
         
         {error && <div className="bg-red-50/80 text-red-600 p-3 rounded-lg mb-6 text-sm border border-red-100 backdrop-blur-sm">{error}</div>}
         
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Emri i Plotë</label>
-            <input 
-              type="text" 
-              value={formData.name}
-              onChange={(e) => setFormData({...formData, name: e.target.value})}
-              className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-              required
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Emri</label>
+              <input 
+                type="text" 
+                value={formData.name}
+                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Mbiemri</label>
+              <input 
+                type="text" 
+                value={formData.surname}
+                onChange={(e) => setFormData({...formData, surname: e.target.value})}
+                className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                required
+              />
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
@@ -605,13 +638,23 @@ const RegisterPage = () => {
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Fjalëkalimi</label>
-            <input 
-              type="password" 
-              value={formData.password}
-              onChange={(e) => setFormData({...formData, password: e.target.value})}
-              className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-              required
-            />
+            <div className="relative">
+              <input 
+                type={showPassword ? "text" : "password"} 
+                value={formData.password}
+                onChange={(e) => setFormData({...formData, password: e.target.value})}
+                className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                placeholder="••••••••"
+                required
+              />
+              <button 
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Roli</label>
@@ -627,35 +670,373 @@ const RegisterPage = () => {
           {formData.role === 'STUDENT' && (
             <>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Programi</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Dega</label>
                 <select 
                   value={formData.program}
                   onChange={(e) => setFormData({...formData, program: e.target.value})}
-                  className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
                 >
                   {programs.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Viti</label>
+                  <select 
+                    value={formData.year}
+                    onChange={(e) => setFormData({...formData, year: e.target.value})}
+                    className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                  >
+                    {years.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Grupi</label>
+                  <select 
+                    value={formData.group_name}
+                    onChange={(e) => setFormData({...formData, group_name: e.target.value})}
+                    className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                  >
+                    {["A", "B", "C"].map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </div>
+              </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Viti</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Lloji i Studimit</label>
                 <select 
-                  value={formData.year}
-                  onChange={(e) => setFormData({...formData, year: e.target.value})}
-                  className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={formData.study_type}
+                  onChange={(e) => setFormData({...formData, study_type: e.target.value})}
+                  className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
                 >
-                  {years.map(y => <option key={y} value={y}>{y}</option>)}
+                  <option value="BACHELOR">Bachelor</option>
+                  <option value="MASTER">Master</option>
                 </select>
               </div>
+              {!hasAdmin && (
+                <div className="flex items-center space-x-2 p-3 bg-blue-50/50 rounded-lg border border-blue-100">
+                  <input 
+                    type="checkbox" 
+                    id="is_president"
+                    checked={formData.is_president}
+                    onChange={(e) => setFormData({...formData, is_president: e.target.checked})}
+                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded"
+                  />
+                  <label htmlFor="is_president" className="text-sm font-bold text-blue-700 cursor-pointer">
+                    President i Klasës (Admin)
+                  </label>
+                </div>
+              )}
             </>
           )}
-          <button className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors">
+          <button 
+            type="submit"
+            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200"
+          >
             Regjistrohu
           </button>
         </form>
-        <p className="mt-6 text-center text-sm text-slate-500">
-          Keni llogari? <Link to="/login" className="text-blue-600 font-medium">Hyni këtu</Link>
+        <p className="mt-6 text-center text-sm text-slate-600">
+          Keni llogari? <Link to="/login" className="text-blue-600 font-bold hover:underline">Hyni këtu</Link>
         </p>
       </motion.div>
+    </div>
+  );
+};
+
+const ProfilePage = () => {
+  const { user, token, refreshUser } = useAuth();
+  const [formData, setFormData] = useState({
+    name: user?.name || '',
+    surname: user?.surname || '',
+    phone: user?.phone || '',
+    bio: user?.bio || '',
+    group_name: user?.group_name || 'A',
+    study_type: user?.study_type || 'BACHELOR'
+  });
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await fetch('/api/user/profile', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(formData)
+      });
+      if (res.ok) {
+        await refreshUser();
+        setMessage('Profili u përditësua me sukses!');
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-8">
+        <div className="flex items-center space-x-6 mb-8">
+          <div className="w-24 h-24 bg-blue-100 rounded-3xl overflow-hidden border-4 border-white shadow-lg">
+            <img src="https://i.ibb.co/LdsTzhWj/IMG-3202.png" alt="Logo" className="w-full h-full object-cover" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">Profili im</h2>
+            <p className="text-slate-500">Menaxhoni të dhënat tuaja personale</p>
+          </div>
+        </div>
+        
+        {message && <div className="bg-green-50 text-green-600 p-4 rounded-xl mb-6 text-sm font-medium border border-green-100">{message}</div>}
+        
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Emri</label>
+              <input 
+                type="text" 
+                value={formData.name}
+                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Mbiemri</label>
+              <input 
+                type="text" 
+                value={formData.surname}
+                onChange={(e) => setFormData({...formData, surname: e.target.value})}
+                className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Email (Nuk mund të ndryshohet)</label>
+            <input 
+              type="email" 
+              value={user?.email}
+              disabled
+              className="w-full p-3 rounded-xl border border-slate-100 bg-slate-50 text-slate-400 outline-none cursor-not-allowed"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Telefon</label>
+            <input 
+              type="text" 
+              value={formData.phone}
+              onChange={(e) => setFormData({...formData, phone: e.target.value})}
+              className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="+355..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">Bio</label>
+            <textarea 
+              value={formData.bio}
+              onChange={(e) => setFormData({...formData, bio: e.target.value})}
+              className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none h-32"
+              placeholder="Tregoni diçka për veten..."
+            />
+          </div>
+
+          {user?.role === 'STUDENT' && (
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Grupi</label>
+                <select 
+                  value={formData.group_name}
+                  onChange={(e) => setFormData({...formData, group_name: e.target.value})}
+                  className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="A">Grupi A</option>
+                  <option value="B">Grupi B</option>
+                  <option value="C">Grupi C</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Lloji i Studimit</label>
+                <select 
+                  value={formData.study_type}
+                  onChange={(e) => setFormData({...formData, study_type: e.target.value})}
+                  className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="BACHELOR">Bachelor</option>
+                  <option value="MASTER">Master</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          <button 
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 text-white p-4 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 disabled:opacity-50"
+          >
+            {loading ? 'Duke ruajtur...' : 'Ruaj Ndryshimet'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const PendingApproval = () => {
+  const { logout } = useAuth();
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 text-center border border-slate-100">
+        <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+          <Clock size={40} className="text-blue-600 animate-pulse" />
+        </div>
+        <h2 className="text-2xl font-bold text-slate-900 mb-2">Duke pritur për miratim</h2>
+        <p className="text-slate-500 mb-8">
+          Kërkesa juaj për t'u bashkuar me klasën është dërguar. Ju lutem prisni që administratori i klasës t'ju pranojë.
+        </p>
+        <button 
+          onClick={logout}
+          className="w-full p-4 rounded-2xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all"
+        >
+          Dil dhe provo më vonë
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const RejectedView = () => {
+  const { token, refreshUser, logout } = useAuth();
+  const [formData, setFormData] = useState({
+    program: 'SHKENCA KOMPJUTERIKE',
+    year: 'VITI 1',
+    group_name: 'A',
+    study_type: 'BACHELOR'
+  });
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await fetch('/api/student/change-classroom', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(formData)
+      });
+      if (res.ok) {
+        await refreshUser();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-slate-100">
+        <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+          <X size={40} className="text-red-600" />
+        </div>
+        <h2 className="text-2xl font-bold text-slate-900 mb-2 text-center">Kërkesa u refuzua</h2>
+        <p className="text-slate-500 mb-8 text-center">
+          Ju nuk jeni pranuar në këtë klasë. Ju lutem zgjidhni një klasë tjetër ose kontaktoni administratorin.
+        </p>
+        
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Dega</label>
+            <select 
+              value={formData.program}
+              onChange={(e) => setFormData({...formData, program: e.target.value})}
+              className="w-full p-4 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+            >
+              <option value="SHKENCA KOMPJUTERIKE">Shkenca Kompjuterike</option>
+              <option value="TIK">TIK</option>
+              <option value="MATEMATIKE">Matematikë</option>
+              <option value="FIZIKE">Fizikë</option>
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Viti</label>
+              <select 
+                value={formData.year}
+                onChange={(e) => setFormData({...formData, year: e.target.value})}
+                className="w-full p-4 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+              >
+                <option value="VITI 1">Viti 1</option>
+                <option value="VITI 2">Viti 2</option>
+                <option value="VITI 3">Viti 3</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Grupi</label>
+              <select 
+                value={formData.group_name}
+                onChange={(e) => setFormData({...formData, group_name: e.target.value})}
+                className="w-full p-4 rounded-2xl bg-slate-50 border-none focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+              >
+                <option value="A">Grupi A</option>
+                <option value="B">Grupi B</option>
+                <option value="C">Grupi C</option>
+              </select>
+            </div>
+          </div>
+          
+          <button 
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 text-white p-4 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 disabled:opacity-50"
+          >
+            {loading ? 'Duke dërguar...' : 'Dërgo Kërkesë të Re'}
+          </button>
+          
+          <button 
+            type="button"
+            onClick={logout}
+            className="w-full p-4 rounded-2xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-all"
+          >
+            Dil
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+const Progress3D = ({ value, label, color }: { value: number, label: string, color: string, key?: any }) => {
+  const height = Math.max(10, value);
+  return (
+    <div className="flex flex-col items-center group">
+      <div className="relative w-12 h-48 flex items-end justify-center perspective-1000">
+        <motion.div 
+          initial={{ height: 0 }}
+          animate={{ height: `${height}%` }}
+          transition={{ duration: 1, ease: "easeOut" }}
+          className={`relative w-8 transform-style-3d transition-all duration-500`}
+        >
+          <div className={`absolute inset-0 ${color} border-r border-black/10 shadow-inner z-20`}></div>
+          <div className={`absolute -top-3 left-0 w-8 h-3 ${color} brightness-125 origin-bottom transform -rotate-x-90 z-30`}></div>
+          <div className={`absolute top-0 -right-3 w-3 h-full ${color} brightness-75 origin-left transform rotate-y-90 z-10`}></div>
+          <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[8px] font-bold px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-40">
+            {value.toFixed(1)}%
+          </div>
+        </motion.div>
+      </div>
+      <p className="mt-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">{label}</p>
     </div>
   );
 };
@@ -665,35 +1046,70 @@ const Dashboard = () => {
   const [stats, setStats] = useState<any>(null);
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [pendingStudents, setPendingStudents] = useState<any[]>([]);
+  const [currentLecture, setCurrentLecture] = useState<any>(null);
 
   useEffect(() => {
     fetchDashboardData();
     if (user?.role === 'TEACHER') {
-      fetchPendingStudents();
+      fetchCurrentLecture();
+    } else {
+      fetchStudentClassStatus();
     }
+    fetchPendingStudents();
   }, []);
 
-  const fetchPendingStudents = async () => {
+  const fetchCurrentLecture = async () => {
     try {
-      const res = await fetch('/api/teacher/pending-students', { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
-      setPendingStudents(data);
+      const res = await fetch('/api/teacher/current-lecture', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) setCurrentLecture(await res.json());
     } catch (e) { console.error(e); }
   };
 
-  const confirmStudent = async (studentId: number) => {
+  const fetchStudentClassStatus = async () => {
     try {
-      const res = await fetch('/api/teacher/confirm-student', {
+      const res = await fetch('/api/student/class-status', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) setCurrentLecture(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const handleLectureStatus = async (status: string) => {
+    try {
+      const res = await fetch('/api/teacher/lecture-status', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ studentId })
+        body: JSON.stringify({ scheduleId: currentLecture.id, status })
       });
-      if (res.ok) {
-        setPendingStudents(pendingStudents.filter(s => s.id !== studentId));
-      }
+      if (res.ok) fetchCurrentLecture();
+    } catch (e) { console.error(e); }
+  };
+
+  const fetchPendingStudents = async () => {
+    try {
+      const res = await fetch('/api/admin/pending-members', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) setPendingStudents(await res.json());
+    } catch (e) { console.error(e); }
+  };
+
+  const handleApprove = async (memberId: number, status: string) => {
+    try {
+      const res = await fetch('/api/admin/approve-member', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ memberId, status })
+      });
+      if (res.ok) fetchPendingStudents();
     } catch (e) { console.error(e); }
   };
 
@@ -703,7 +1119,6 @@ const Dashboard = () => {
       const data = await res.json();
       setStats(data);
       
-      // Mock recent activity for now
       setRecentActivity([
         { title: 'Detyra e re: Analiza e Regresionit', time: 'Para 1 ore', icon: BookOpen },
         { title: 'Testi i Kimisë u vlerësua', time: 'Para 3 orësh', icon: Award },
@@ -736,7 +1151,71 @@ const Dashboard = () => {
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-20 -mt-20 blur-3xl"></div>
       </div>
 
-      {user?.role === 'TEACHER' && pendingStudents.length > 0 && (
+      {/* Teacher Lecture Options */}
+      {user?.role === 'TEACHER' && currentLecture && (
+        <div className="mb-8 bg-blue-600 rounded-3xl p-8 text-white shadow-xl shadow-blue-200">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div>
+              <p className="text-blue-100 text-sm font-bold uppercase tracking-wider mb-1">Leksioni Aktual</p>
+              <h3 className="text-2xl font-bold">{currentLecture.subject} - {currentLecture.class_name}</h3>
+              <p className="text-blue-100">{currentLecture.start_time} - {currentLecture.end_time}</p>
+              {currentLecture.current_status && (
+                <div className="mt-2 inline-block px-3 py-1 bg-white/20 rounded-lg text-xs font-bold">
+                  Statusi: {currentLecture.current_status === 'OPEN' ? 'Hapur' : currentLecture.current_status === 'SOON' ? 'Vjen Së Shpejti' : 'Nuk vjen sot'}
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <button 
+                onClick={() => handleLectureStatus('OPEN')}
+                className="px-6 py-3 bg-white text-blue-600 rounded-2xl font-bold hover:bg-blue-50 transition-all"
+              >
+                1. Hap Klasën
+              </button>
+              <button 
+                onClick={() => handleLectureStatus('SOON')}
+                className="px-6 py-3 bg-blue-500 text-white border border-blue-400 rounded-2xl font-bold hover:bg-blue-400 transition-all"
+              >
+                2. Vij Së Shpejti
+              </button>
+              <button 
+                onClick={() => handleLectureStatus('NOT_COMING')}
+                className="px-6 py-3 bg-red-500 text-white rounded-2xl font-bold hover:bg-red-600 transition-all"
+              >
+                3. Nuk Vij Sot
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Student Lecture Status */}
+      {user?.role === 'STUDENT' && currentLecture && (
+        <div className={`mb-8 rounded-3xl p-8 text-white shadow-xl ${
+          currentLecture.status === 'OPEN' ? 'bg-emerald-500 shadow-emerald-100' :
+          currentLecture.status === 'SOON' ? 'bg-amber-500 shadow-amber-100' :
+          currentLecture.status === 'NOT_COMING' ? 'bg-red-500 shadow-red-100' :
+          'bg-slate-800 shadow-slate-100'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-white/80 text-sm font-bold uppercase tracking-wider mb-1">Statusi i Mësimit</p>
+              <h3 className="text-2xl font-bold">{currentLecture.subject}</h3>
+              <p className="text-white/80">Mësuesi: {currentLecture.teacher_name}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-3xl font-black">
+                {currentLecture.status === 'OPEN' ? 'LIVE' :
+                 currentLecture.status === 'SOON' ? 'SË SHPEJTI' :
+                 currentLecture.status === 'NOT_COMING' ? 'ANULUAR' : 'PRITJE'}
+              </p>
+              <p className="text-sm opacity-80">{currentLecture.start_time} - {currentLecture.end_time}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingStudents.length > 0 && (
         <div className="bg-amber-50 border border-amber-100 rounded-3xl p-8">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-xl font-bold text-amber-900 flex items-center">
@@ -750,18 +1229,26 @@ const Dashboard = () => {
             {pendingStudents.map(student => (
               <div key={student.id} className="bg-white p-4 rounded-2xl border border-amber-200 flex flex-col justify-between">
                 <div>
-                  <p className="font-bold text-slate-900">{student.name}</p>
+                  <p className="font-bold text-slate-900">{student.name} {student.surname}</p>
                   <p className="text-xs text-slate-500 mb-2">{student.email}</p>
                   <p className="text-xs font-medium text-amber-700 bg-amber-100 inline-block px-2 py-1 rounded">
-                    {student.program} • {student.year}
+                    {student.class_name}
                   </p>
                 </div>
-                <button 
-                  onClick={() => confirmStudent(student.id)}
-                  className="mt-4 w-full bg-amber-600 text-white py-2 rounded-xl text-sm font-bold hover:bg-amber-700 transition-colors"
-                >
-                  Konfirmo
-                </button>
+                <div className="flex gap-2 mt-4">
+                  <button 
+                    onClick={() => handleApprove(student.id, 'CONFIRMED')}
+                    className="flex-1 bg-green-600 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-700 transition-all"
+                  >
+                    Prano
+                  </button>
+                  <button 
+                    onClick={() => handleApprove(student.id, 'REFUSED')}
+                    className="flex-1 bg-red-100 text-red-600 py-2 rounded-xl text-xs font-bold hover:bg-red-200 transition-all"
+                  >
+                    Refuzo
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -791,11 +1278,23 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
           <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-bold text-slate-900">Përmbledhje e Performancës</h3>
+            <h3 className="text-xl font-bold text-slate-900">Përmbledhje e Performancës (3D)</h3>
             <Link to="/analytics" className="text-blue-600 text-sm font-bold hover:underline">Shiko të gjitha</Link>
           </div>
-          <div className="h-64 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 italic border border-dashed border-slate-200">
-            Grafiku i performancës do të shfaqet në seksionin e Analitikës
+          <div className="flex justify-around items-end h-64 pb-4">
+            {(() => {
+              const data = [
+                { name: 'Teste', value: (stats?.logs?.filter((l: any) => l.type === 'TEST').reduce((acc: number, curr: any) => acc + (curr.score/curr.max_score), 0) / (stats?.logs?.filter((l: any) => l.type === 'TEST').length || 1)) * 100 },
+                { name: 'Detyra', value: (stats?.logs?.filter((l: any) => l.type === 'ASSIGNMENT').reduce((acc: number, curr: any) => acc + (curr.score/curr.max_score), 0) / (stats?.logs?.filter((l: any) => l.type === 'ASSIGNMENT').length || 1)) * 100 },
+                { name: 'Pjesëmarrje', value: (stats?.attendance?.find((a: any) => a.status === 'PRESENT')?.count || 0) / 20 * 100 }
+              ];
+              return data.map((d, i) => {
+                let color = 'bg-green-500';
+                if (d.value < 50) color = 'bg-red-500';
+                else if (d.value < 80) color = 'bg-orange-500';
+                return <Progress3D key={i} value={d.value} label={d.name} color={color} />;
+              });
+            })()}
           </div>
         </div>
         <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100">
@@ -823,10 +1322,18 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" />;
 
+  // Approval logic
+  if (user.role === 'STUDENT' && !user.is_class_admin) {
+    if ((user as any).class_status === 'PENDING') return <PendingApproval />;
+    if ((user as any).class_status === 'REFUSED') return <RejectedView />;
+    if (!user.is_confirmed) return <PendingApproval />;
+  }
+
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
     { icon: Users, label: 'Pjesëmarrja', path: '/attendance' },
     { icon: CalendarIcon, label: 'Kalendari', path: '/calendar' },
+    { icon: BookOpen, label: 'Libraria', path: '/library' },
     { icon: FileText, label: 'Teste', path: '/tests' },
     { icon: BookOpen, label: 'Detyra', path: '/assignments' },
     { icon: HelpCircle, label: 'Pyetje Live', path: '/live-questions' },
@@ -924,7 +1431,9 @@ export default function App() {
           <Route path="/live-questions" element={<Layout><LiveQuestions user={user} token={token || ''} /></Layout>} />
           <Route path="/screen-share" element={<Layout><ScreenShare user={user} token={token || ''} /></Layout>} />
           <Route path="/chat" element={<Layout><Chat user={user} token={token || ''} /></Layout>} />
+          <Route path="/library" element={<Layout><Library user={user} token={token || ''} /></Layout>} />
           <Route path="/analytics" element={<Layout><Analytics user={user} token={token || ''} /></Layout>} />
+          <Route path="/profile" element={<Layout><ProfilePage /></Layout>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </Router>

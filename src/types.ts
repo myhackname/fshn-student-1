@@ -3,12 +3,19 @@ export type Role = 'STUDENT' | 'TEACHER';
 export interface User {
   id: number;
   name: string;
+  surname?: string;
   email: string;
   role: Role;
+  phone?: string;
+  bio?: string;
   class_code?: string;
   profile_photo?: string;
   program?: string;
   year?: string;
+  group_name?: string;
+  study_type?: string;
+  is_class_admin?: boolean;
+  is_confirmed?: boolean;
 }
 
 export interface Message {

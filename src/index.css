@@ -1,1 +1,16 @@
 @import "tailwindcss";
+
+@layer utilities {
+  .perspective-1000 {
+    perspective: 1000px;
+  }
+  .transform-style-3d {
+    transform-style: preserve-3d;
+  }
+  .rotate-x-90 {
+    transform: rotateX(90deg);
+  }
+  .rotate-y-90 {
+    transform: rotateY(90deg);
+  }
+}

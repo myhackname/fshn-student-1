@@ -25,15 +25,90 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    surname TEXT,
     email TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     role TEXT CHECK(role IN ('STUDENT', 'TEACHER')) NOT NULL,
+    phone TEXT,
+    bio TEXT,
     program TEXT,
     year TEXT,
+    group_name TEXT, -- A, B, C
+    study_type TEXT, -- Bachelor, Master
     is_confirmed BOOLEAN DEFAULT 0,
     class_code TEXT,
     profile_photo TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS classes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    code TEXT UNIQUE NOT NULL,
+    department TEXT,
+    year TEXT,
+    group_name TEXT,
+    study_type TEXT,
+    teacher_id INTEGER,
+    admin_id INTEGER, -- Student admin
+    FOREIGN KEY(teacher_id) REFERENCES users(id),
+    FOREIGN KEY(admin_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS class_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    class_id INTEGER,
+    user_id INTEGER,
+    status TEXT CHECK(status IN ('PENDING', 'CONFIRMED', 'REFUSED')) DEFAULT 'PENDING',
+    is_admin BOOLEAN DEFAULT 0,
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(class_id) REFERENCES classes(id),
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS teacher_schedule (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teacher_id INTEGER,
+    class_id INTEGER,
+    subject TEXT NOT NULL,
+    day_of_week INTEGER, -- 1-5 (Mon-Fri)
+    start_time TEXT NOT NULL, -- HH:MM
+    end_time TEXT NOT NULL, -- HH:MM
+    type TEXT CHECK(type IN ('LECTURE', 'SEMINAR')),
+    FOREIGN KEY(teacher_id) REFERENCES users(id),
+    FOREIGN KEY(class_id) REFERENCES classes(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS library_books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    author TEXT,
+    file_path TEXT NOT NULL,
+    uploader_id INTEGER,
+    class_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(uploader_id) REFERENCES users(id),
+    FOREIGN KEY(class_id) REFERENCES classes(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS exams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    test_id INTEGER,
+    semester INTEGER, -- 1, 2, 3
+    credits INTEGER,
+    teacher_id INTEGER,
+    exam_date DATETIME,
+    room TEXT,
+    status TEXT DEFAULT 'SCHEDULED',
+    FOREIGN KEY(teacher_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS lecture_status (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    schedule_id INTEGER,
+    status TEXT CHECK(status IN ('OPEN', 'SOON', 'NOT_COMING')),
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(schedule_id) REFERENCES teacher_schedule(id)
   );
 
   CREATE TABLE IF NOT EXISTS password_resets (
@@ -43,20 +118,15 @@ db.exec(`
     expires_at DATETIME NOT NULL
   );
 
-  CREATE TABLE IF NOT EXISTS classes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    code TEXT UNIQUE NOT NULL,
-    teacher_id INTEGER,
-    FOREIGN KEY(teacher_id) REFERENCES users(id)
-  );
-
   CREATE TABLE IF NOT EXISTS attendance (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
+    class_id INTEGER,
     status TEXT CHECK(status IN ('PRESENT', 'ABSENT', 'OFFLINE')),
+    verified_by_teacher BOOLEAN DEFAULT 0,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id)
+    FOREIGN KEY(user_id) REFERENCES users(id),
+    FOREIGN KEY(class_id) REFERENCES classes(id)
   );
 
   CREATE TABLE IF NOT EXISTS tests (
@@ -89,6 +159,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     test_id INTEGER,
     user_id INTEGER,
+    is_exam BOOLEAN DEFAULT 0,
     start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     end_time DATETIME,
     status TEXT CHECK(status IN ('STARTED', 'SUBMITTED', 'GRADED')) DEFAULT 'STARTED',
@@ -114,11 +185,13 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sender_id INTEGER,
     receiver_id INTEGER, -- NULL for class chat
+    class_id INTEGER,
     chat_type TEXT CHECK(chat_type IN ('PRIVATE', 'CLASS', 'SCHOOL')) DEFAULT 'CLASS',
     content TEXT NOT NULL,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(sender_id) REFERENCES users(id),
-    FOREIGN KEY(receiver_id) REFERENCES users(id)
+    FOREIGN KEY(receiver_id) REFERENCES users(id),
+    FOREIGN KEY(class_id) REFERENCES classes(id)
   );
 
   CREATE TABLE IF NOT EXISTS live_questions (
@@ -180,10 +253,32 @@ db.exec(`
 // Migration: Add missing columns if they don't exist
 const userColumns = db.prepare("PRAGMA table_info(users)").all() as any[];
 const userColumnNames = userColumns.map(c => c.name);
+if (!userColumnNames.includes('surname')) db.prepare("ALTER TABLE users ADD COLUMN surname TEXT").run();
+if (!userColumnNames.includes('phone')) db.prepare("ALTER TABLE users ADD COLUMN phone TEXT").run();
+if (!userColumnNames.includes('bio')) db.prepare("ALTER TABLE users ADD COLUMN bio TEXT").run();
+if (!userColumnNames.includes('group_name')) db.prepare("ALTER TABLE users ADD COLUMN group_name TEXT").run();
+if (!userColumnNames.includes('study_type')) db.prepare("ALTER TABLE users ADD COLUMN study_type TEXT").run();
 if (!userColumnNames.includes('program')) db.prepare("ALTER TABLE users ADD COLUMN program TEXT").run();
 if (!userColumnNames.includes('year')) db.prepare("ALTER TABLE users ADD COLUMN year TEXT").run();
 if (!userColumnNames.includes('is_confirmed')) db.prepare("ALTER TABLE users ADD COLUMN is_confirmed BOOLEAN DEFAULT 0").run();
 if (!userColumnNames.includes('profile_photo')) db.prepare("ALTER TABLE users ADD COLUMN profile_photo TEXT").run();
+
+const classColumns = db.prepare("PRAGMA table_info(classes)").all() as any[];
+const classColumnNames = classColumns.map(c => c.name);
+if (!classColumnNames.includes('department')) db.prepare("ALTER TABLE classes ADD COLUMN department TEXT").run();
+if (!classColumnNames.includes('year')) db.prepare("ALTER TABLE classes ADD COLUMN year TEXT").run();
+if (!classColumnNames.includes('group_name')) db.prepare("ALTER TABLE classes ADD COLUMN group_name TEXT").run();
+if (!classColumnNames.includes('study_type')) db.prepare("ALTER TABLE classes ADD COLUMN study_type TEXT").run();
+if (!classColumnNames.includes('admin_id')) db.prepare("ALTER TABLE classes ADD COLUMN admin_id INTEGER").run();
+
+const attendanceColumns = db.prepare("PRAGMA table_info(attendance)").all() as any[];
+const attendanceColumnNames = attendanceColumns.map(c => c.name);
+if (!attendanceColumnNames.includes('class_id')) db.prepare("ALTER TABLE attendance ADD COLUMN class_id INTEGER").run();
+if (!attendanceColumnNames.includes('verified_by_teacher')) db.prepare("ALTER TABLE attendance ADD COLUMN verified_by_teacher BOOLEAN DEFAULT 0").run();
+
+const testAttemptColumns = db.prepare("PRAGMA table_info(test_attempts)").all() as any[];
+const testAttemptColumnNames = testAttemptColumns.map(c => c.name);
+if (!testAttemptColumnNames.includes('is_exam')) db.prepare("ALTER TABLE test_attempts ADD COLUMN is_exam BOOLEAN DEFAULT 0").run();
 
 const testColumns = db.prepare("PRAGMA table_info(tests)").all() as any[];
 const testColumnNames = testColumns.map(c => c.name);
@@ -368,20 +463,68 @@ async function startServer() {
   };
 
   // Auth Routes
-  app.post("/api/auth/register", async (req, res) => {
-    const { name, email, password, role, program, year } = req.body;
+  app.get("/api/auth/check-class-admin", (req, res) => {
+    const { program, year, study_type, group_name } = req.query;
+    const classroom = db.prepare("SELECT admin_id FROM classes WHERE department = ? AND year = ? AND study_type = ? AND group_name = ?")
+      .get(program, year, study_type, group_name) as any;
     
-    // Domain restriction
-    if (role === 'STUDENT' && !email.endsWith('@fshnstudent.info')) {
-      return res.status(400).json({ error: "Vetëm email-et @fshnstudent.info lejohen për studentët" });
-    }
+    res.json({ hasAdmin: !!(classroom && classroom.admin_id) });
+  });
 
+  app.post("/api/auth/register", async (req, res) => {
+    const { name, surname, email, password, role, program, year, group_name, study_type, phone, is_president } = req.body;
+    
     const hashedPassword = await bcrypt.hash(password, 10);
+    const logoUrl = "https://i.ibb.co/LdsTzhWj/IMG-3202.png";
     try {
-      const info = db.prepare("INSERT INTO users (name, email, password, role, program, year, is_confirmed) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run(name, email, hashedPassword, role, program, year, 1); // Set is_confirmed to 1 by default for now
-      res.json({ id: info.lastInsertRowid });
+      db.transaction(() => {
+        const info = db.prepare("INSERT INTO users (name, surname, email, password, role, program, year, group_name, study_type, phone, is_confirmed, profile_photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          .run(name, surname, email, hashedPassword, role, program, year, group_name, study_type, phone, 0, logoUrl);
+        
+        const userId = info.lastInsertRowid;
+
+        if (role === 'STUDENT') {
+          // Find or create class
+          let classroom = db.prepare("SELECT id, admin_id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
+            .get(program, year, group_name, study_type) as any;
+          
+          if (!classroom) {
+            // Create class
+            const classCode = `CLASS-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+            const classInfo = db.prepare("INSERT INTO classes (name, code, department, year, group_name, study_type, admin_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
+              .run(`${program} - ${year}`, classCode, program, year, group_name, study_type, is_president ? userId : null);
+            
+            classroom = { id: classInfo.lastInsertRowid, admin_id: is_president ? userId : null };
+            
+            if (is_president) {
+              db.prepare("UPDATE users SET is_confirmed = 1 WHERE id = ?").run(userId);
+              db.prepare("INSERT INTO class_members (class_id, user_id, status, is_admin) VALUES (?, ?, 'CONFIRMED', 1)")
+                .run(classroom.id, userId);
+            } else {
+              db.prepare("INSERT INTO class_members (class_id, user_id, status) VALUES (?, ?, 'PENDING')")
+                .run(classroom.id, userId);
+            }
+          } else {
+            // Class exists
+            if (is_president && !classroom.admin_id) {
+              // Set as admin if none exists
+              db.prepare("UPDATE classes SET admin_id = ? WHERE id = ?").run(userId, classroom.id);
+              db.prepare("UPDATE users SET is_confirmed = 1 WHERE id = ?").run(userId);
+              db.prepare("INSERT INTO class_members (class_id, user_id, status, is_admin) VALUES (?, ?, 'CONFIRMED', 1)")
+                .run(classroom.id, userId);
+            } else {
+              // Join as pending
+              db.prepare("INSERT INTO class_members (class_id, user_id, status) VALUES (?, ?, 'PENDING')")
+                .run(classroom.id, userId);
+            }
+          }
+        } else {
+          db.prepare("UPDATE users SET is_confirmed = 1 WHERE id = ?").run(userId);
+        }
+      })();
+      res.json({ success: true });
     } catch (err: any) {
+      console.error("Register error:", err);
       res.status(400).json({ error: "Email-i ekziston ose të dhëna të gabuara" });
     }
   });
@@ -391,26 +534,45 @@ async function startServer() {
     try {
       const { email, password } = req.body;
       console.log("Login attempt for:", email);
-      const user: any = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
-      if (!user) {
+      const userDetails = db.prepare(`
+        SELECT u.*, cm.status as class_status, cm.is_admin as is_class_admin
+        FROM users u
+        LEFT JOIN class_members cm ON u.id = cm.user_id
+        WHERE u.email = ?
+      `).get(email) as any;
+
+      if (!userDetails) {
         console.log("User not found:", email);
         return res.status(401).json({ error: "Kredenciale të gabuara" });
       }
       
-      const isMatch = await bcrypt.compare(password, user.password);
+      const isMatch = await bcrypt.compare(password, userDetails.password);
       if (!isMatch) {
         console.log("Invalid password for:", email);
         return res.status(401).json({ error: "Kredenciale të gabuara" });
       }
       
-      if (!user.is_confirmed) {
-        console.log("User not confirmed:", email);
-        return res.status(401).json({ error: "Llogaria juaj ende nuk është konfirmuar nga mësuesi" });
-      }
-
-      const token = jwt.sign({ id: user.id, role: user.role, name: user.name }, JWT_SECRET);
+      const token = jwt.sign({ id: userDetails.id, role: userDetails.role, name: userDetails.name }, JWT_SECRET);
       console.log("Login successful for:", email);
-      res.json({ token, user: { id: user.id, name: user.name, role: user.role, email: user.email, program: user.program, year: user.year } });
+      res.json({ 
+        token, 
+        user: { 
+          id: userDetails.id, 
+          name: userDetails.name, 
+          surname: userDetails.surname,
+          role: userDetails.role, 
+          email: userDetails.email, 
+          program: userDetails.program, 
+          year: userDetails.year,
+          group_name: userDetails.group_name,
+          study_type: userDetails.study_type,
+          phone: userDetails.phone,
+          profile_photo: userDetails.profile_photo,
+          is_confirmed: userDetails.is_confirmed,
+          class_status: userDetails.class_status,
+          is_class_admin: userDetails.is_class_admin
+        } 
+      });
     } catch (err: any) {
       console.error("Login error:", err);
       res.status(500).json({ error: "Gabim i brendshëm i serverit: " + err.message });
@@ -422,9 +584,14 @@ async function startServer() {
       const { email, name, uid } = req.body;
       
       // Check if user exists
-      let user: any = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+      const userDetails = db.prepare(`
+        SELECT u.*, cm.status as class_status, cm.is_admin as is_class_admin
+        FROM users u
+        LEFT JOIN class_members cm ON u.id = cm.user_id
+        WHERE u.email = ?
+      `).get(email) as any;
       
-      if (!user) {
+      if (!userDetails) {
         return res.status(404).json({ 
           error: "Llogaria nuk u gjet. Ju lutem regjistrohuni më parë duke zgjedhur degën dhe vitin tuaj.",
           email: email,
@@ -432,8 +599,26 @@ async function startServer() {
         });
       }
 
-      const token = jwt.sign({ id: user.id, role: user.role, name: user.name }, JWT_SECRET);
-      res.json({ token, user: { id: user.id, name: user.name, role: user.role, email: user.email, program: user.program, year: user.year } });
+      const token = jwt.sign({ id: userDetails.id, role: userDetails.role, name: userDetails.name }, JWT_SECRET);
+      res.json({ 
+        token, 
+        user: { 
+          id: userDetails.id, 
+          name: userDetails.name, 
+          surname: userDetails.surname,
+          role: userDetails.role, 
+          email: userDetails.email, 
+          program: userDetails.program, 
+          year: userDetails.year,
+          group_name: userDetails.group_name,
+          study_type: userDetails.study_type,
+          phone: userDetails.phone,
+          profile_photo: userDetails.profile_photo,
+          is_confirmed: userDetails.is_confirmed,
+          class_status: userDetails.class_status,
+          is_class_admin: userDetails.is_class_admin
+        } 
+      });
     } catch (err: any) {
       console.error("Firebase Auth Error:", err);
       res.status(500).json({ error: "Gabim gjatë autentikimit me Firebase: " + err.message });
@@ -524,9 +709,154 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // User Profile & Stats
+  // Admin & Approval Routes
+  app.get("/api/admin/pending-members", authenticate, (req: any, res) => {
+    // Check if user is admin of any class
+    const adminClasses = db.prepare("SELECT id FROM classes WHERE admin_id = ?").all(req.user.id) as any[];
+    if (adminClasses.length === 0) return res.json([]);
+
+    const classIds = adminClasses.map(c => c.id);
+    const pending = db.prepare(`
+      SELECT cm.*, u.name, u.surname, u.email, c.name as class_name
+      FROM class_members cm
+      JOIN users u ON cm.user_id = u.id
+      JOIN classes c ON cm.class_id = c.id
+      WHERE cm.class_id IN (${classIds.map(() => '?').join(',')}) AND cm.status = 'PENDING'
+    `).all(...classIds);
+    res.json(pending);
+  });
+
+  app.post("/api/admin/approve-member", authenticate, (req: any, res) => {
+    const { memberId, status } = req.body; // status: 'CONFIRMED' or 'REFUSED'
+    const member = db.prepare("SELECT * FROM class_members WHERE id = ?").get(memberId) as any;
+    if (!member) return res.status(404).json({ error: "Anëtari nuk u gjet" });
+
+    // Check if requester is admin of this class
+    const classroom = db.prepare("SELECT admin_id FROM classes WHERE id = ?").get(member.class_id) as any;
+    if (classroom.admin_id !== req.user.id) return res.status(403).json({ error: "Pa autorizuar" });
+
+    db.transaction(() => {
+      db.prepare("UPDATE class_members SET status = ? WHERE id = ?").run(status, memberId);
+      if (status === 'CONFIRMED') {
+        db.prepare("UPDATE users SET is_confirmed = 1 WHERE id = ?").run(member.user_id);
+      }
+    })();
+
+    res.json({ success: true });
+  });
+
+  app.post("/api/student/change-classroom", authenticate, (req: any, res) => {
+    const { program, year, group_name, study_type } = req.body;
+    
+    db.transaction(() => {
+      // Remove from old class
+      db.prepare("DELETE FROM class_members WHERE user_id = ?").run(req.user.id);
+      
+      // Update user info
+      db.prepare("UPDATE users SET program = ?, year = ?, group_name = ?, study_type = ?, is_confirmed = 0 WHERE id = ?")
+        .run(program, year, group_name, study_type, req.user.id);
+      
+      // Join new class
+      let classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
+        .get(program, year, group_name, study_type) as any;
+      
+      if (!classroom) {
+        const classCode = `CLASS-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+        const classInfo = db.prepare("INSERT INTO classes (name, code, department, year, group_name, study_type, admin_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
+          .run(`${program} - ${year}`, classCode, program, year, group_name, study_type, req.user.id);
+        
+        classroom = { id: classInfo.lastInsertRowid };
+        db.prepare("UPDATE users SET is_confirmed = 1 WHERE id = ?").run(req.user.id);
+        db.prepare("INSERT INTO class_members (class_id, user_id, status, is_admin) VALUES (?, ?, 'CONFIRMED', 1)")
+          .run(classroom.id, req.user.id);
+      } else {
+        db.prepare("INSERT INTO class_members (class_id, user_id, status) VALUES (?, ?, 'PENDING')")
+          .run(classroom.id, req.user.id);
+      }
+    })();
+    
+    res.json({ success: true });
+  });
+
+  // Lecture Status Routes
+  app.get("/api/teacher/current-lecture", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    
+    const now = new Date();
+    const day = now.getDay(); // 0-6 (Sun-Sat)
+    const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    
+    const current = db.prepare(`
+      SELECT ts.*, c.name as class_name, ls.status as current_status
+      FROM teacher_schedule ts
+      JOIN classes c ON ts.class_id = c.id
+      LEFT JOIN lecture_status ls ON ts.id = ls.schedule_id AND date(ls.updated_at) = date('now')
+      WHERE ts.teacher_id = ? AND ts.day_of_week = ? AND ts.start_time <= ? AND ts.end_time >= ?
+    `).get(req.user.id, day, time, time) as any;
+    
+    res.json(current || null);
+  });
+
+  app.post("/api/teacher/lecture-status", authenticate, (req: any, res) => {
+    const { scheduleId, status } = req.body;
+    
+    const existing = db.prepare("SELECT id FROM lecture_status WHERE schedule_id = ? AND date(updated_at) = date('now')").get(scheduleId) as any;
+    
+    if (existing) {
+      db.prepare("UPDATE lecture_status SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, existing.id);
+    } else {
+      db.prepare("INSERT INTO lecture_status (schedule_id, status) VALUES (?, ?)").run(scheduleId, status);
+    }
+    
+    res.json({ success: true });
+  });
+
+  app.get("/api/student/class-status", authenticate, (req: any, res) => {
+    const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(req.user.id) as any;
+    const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
+      .get(user.program, user.year, user.group_name, user.study_type) as any;
+    
+    if (!classroom) return res.json(null);
+
+    const now = new Date();
+    const day = now.getDay();
+    const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+    const lecture = db.prepare(`
+      SELECT ts.*, u.name as teacher_name, ls.status
+      FROM teacher_schedule ts
+      JOIN users u ON ts.teacher_id = u.id
+      LEFT JOIN lecture_status ls ON ts.id = ls.schedule_id AND date(ls.updated_at) = date('now')
+      WHERE ts.class_id = ? AND ts.day_of_week = ? AND ts.start_time <= ? AND ts.end_time >= ?
+    `).get(classroom.id, day, time, time) as any;
+
+    res.json(lecture || null);
+  });
+  app.post("/api/user/profile", authenticate, (req: any, res) => {
+    const { name, surname, phone, bio, group_name, study_type } = req.body;
+    try {
+      db.prepare(`
+        UPDATE users 
+        SET name = ?, surname = ?, phone = ?, bio = ?, group_name = ?, study_type = ? 
+        WHERE id = ?
+      `).run(name, surname, phone, bio, group_name, study_type, req.user.id);
+      
+      const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id) as any;
+      delete user.password;
+      res.json(user);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/user/me", authenticate, (req: any, res) => {
-    const user = db.prepare("SELECT id, name, email, role, class_code, program, year, profile_photo FROM users WHERE id = ?").get(req.user.id);
+    const user = db.prepare(`
+      SELECT u.id, u.name, u.surname, u.email, u.role, u.class_code, u.program, u.year, u.group_name, u.study_type, u.phone, u.bio, u.profile_photo, u.is_confirmed,
+             cm.status as class_status, cm.is_admin as is_class_admin
+      FROM users u
+      LEFT JOIN class_members cm ON u.id = cm.user_id
+      WHERE u.id = ?
+    `).get(req.user.id) as any;
     res.json(user);
   });
 
@@ -741,7 +1071,7 @@ async function startServer() {
         .run(totalScore, finalGrade, feedback, req.params.id);
       
       const attempt = db.prepare(`
-        SELECT ta.user_id, t.total_points, t.title, t.teacher_id, u.name as teacher_name
+        SELECT ta.user_id, ta.is_exam, t.total_points, t.title, t.teacher_id, u.name as teacher_name
         FROM test_attempts ta 
         JOIN tests t ON ta.test_id = t.id 
         JOIN users u ON t.teacher_id = u.id
@@ -750,12 +1080,14 @@ async function startServer() {
 
       if (attempt) {
         // Log to performance using the 4-10 grade
-        db.prepare("INSERT INTO performance_logs (user_id, type, score, max_score) VALUES (?, 'TEST', ?, 10)")
-          .run(attempt.user_id, finalGrade, 10);
+        const logType = attempt.is_exam ? 'EXAM' : 'TEST';
+        db.prepare("INSERT INTO performance_logs (user_id, type, score, max_score) VALUES (?, ?, ?, 10)")
+          .run(attempt.user_id, logType, finalGrade);
         
         // Notify student
+        const notificationTitle = attempt.is_exam ? "Rezultati i Provimit: " : "Rezultati i Testit: ";
         db.prepare("INSERT INTO notifications (user_id, title, content, type) VALUES (?, ?, ?, 'GRADE')")
-          .run(attempt.user_id, "Rezultati i Testit: " + attempt.title, `Mësuesi ${attempt.teacher_name} ju ka vlerësuar me notën ${finalGrade}.`, 'GRADE');
+          .run(attempt.user_id, notificationTitle + attempt.title, `Mësuesi ${attempt.teacher_name} ju ka vlerësuar me notën ${finalGrade}.`, 'GRADE');
       }
     })();
     
@@ -946,15 +1278,31 @@ async function startServer() {
   // Chat
   app.get("/api/chat/messages", authenticate, (req: any, res) => {
     const { type } = req.query;
-    // Auto-delete logic: only return messages from the last 12 hours for CLASS and SCHOOL chats
-    const messages = db.prepare(`
+    
+    let query = `
       SELECT m.*, u.name as senderName 
       FROM messages m 
       JOIN users u ON m.sender_id = u.id 
       WHERE m.chat_type = ? 
       AND m.timestamp > datetime('now', '-12 hours')
-      ORDER BY m.timestamp ASC
-    `).all(type || 'CLASS');
+    `;
+    const params: any[] = [type || 'CLASS'];
+
+    if (type === 'CLASS') {
+      const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(req.user.id) as any;
+      const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
+        .get(user.program, user.year, user.group_name, user.study_type) as any;
+      
+      if (classroom) {
+        query += " AND m.class_id = ?";
+        params.push(classroom.id);
+      } else {
+        return res.json([]);
+      }
+    }
+
+    query += " ORDER BY m.timestamp ASC";
+    const messages = db.prepare(query).all(...params);
     res.json(messages);
   });
 
@@ -1007,6 +1355,53 @@ async function startServer() {
       WHERE s.student_id = ?
     `).all(req.user.id);
     res.json(submissions);
+  });
+
+  // Digital Library
+  app.get("/api/library/books", authenticate, (req: any, res) => {
+    const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(req.user.id) as any;
+    const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
+      .get(user.program, user.year, user.group_name, user.study_type) as any;
+    
+    if (!classroom) return res.json([]);
+
+    const books = db.prepare(`
+      SELECT b.*, u.name as uploader_name 
+      FROM library_books b 
+      JOIN users u ON b.uploader_id = u.id 
+      WHERE b.class_id = ?
+      ORDER BY b.created_at DESC
+    `).all(classroom.id);
+    res.json(books);
+  });
+
+  app.post("/api/library/upload", authenticate, upload.single('file'), (req: any, res) => {
+    const { title, author } = req.body;
+    const filePath = req.file ? `/uploads/${req.file.filename}` : null;
+    
+    if (!filePath) return res.status(400).json({ error: "File i kërkuar" });
+
+    // Check if user is teacher or class admin
+    const user = db.prepare(`
+      SELECT u.role, cm.is_admin as is_class_admin, u.program, u.year, u.group_name, u.study_type
+      FROM users u
+      LEFT JOIN class_members cm ON u.id = cm.user_id
+      WHERE u.id = ?
+    `).get(req.user.id) as any;
+
+    if (user.role !== 'TEACHER' && !user.is_class_admin) {
+      return res.status(403).json({ error: "Vetëm mësuesit dhe presidenti i klasës mund të publikojnë libra" });
+    }
+
+    const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
+      .get(user.program, user.year, user.group_name, user.study_type) as any;
+
+    if (!classroom) return res.status(400).json({ error: "Klasa nuk u gjet" });
+
+    const info = db.prepare("INSERT INTO library_books (title, author, file_path, uploader_id, class_id) VALUES (?, ?, ?, ?, ?)")
+      .run(title, author || "I panjohur", filePath, req.user.id, classroom.id);
+    
+    res.json({ id: info.lastInsertRowid });
   });
 
   // Schedules
@@ -1071,13 +1466,37 @@ async function startServer() {
   io.on("connection", (socket) => {
     socket.on("join", (userData) => {
       onlineUsers.set(socket.id, userData);
+      
+      if (userData.role === 'STUDENT') {
+        const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(userData.id) as any;
+        const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
+          .get(user.program, user.year, user.group_name, user.study_type) as any;
+        
+        if (classroom) {
+          socket.join(`class_${classroom.id}`);
+        }
+      }
+      
       io.emit("user_status", Array.from(onlineUsers.values()));
     });
 
     socket.on("send_message", (msg) => {
-      db.prepare("INSERT INTO messages (sender_id, content, chat_type) VALUES (?, ?, ?)")
-        .run(msg.senderId, msg.content, msg.chatType || 'CLASS');
-      io.emit("new_message", msg);
+      let classId = null;
+      if (msg.chatType === 'CLASS') {
+        const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(msg.senderId) as any;
+        const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
+          .get(user.program, user.year, user.group_name, user.study_type) as any;
+        classId = classroom?.id;
+      }
+
+      db.prepare("INSERT INTO messages (sender_id, content, chat_type, class_id) VALUES (?, ?, ?, ?)")
+        .run(msg.senderId, msg.content, msg.chatType || 'CLASS', classId);
+      
+      if (msg.chatType === 'CLASS' && classId) {
+        io.to(`class_${classId}`).emit("new_message", msg);
+      } else {
+        io.emit("new_message", msg);
+      }
     });
 
     socket.on("disconnect", () => {

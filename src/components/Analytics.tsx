@@ -9,6 +9,35 @@ import {
   Award, Calendar, ChevronRight, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 
+const Progress3D = ({ value, label, color }: { value: number, label: string, color: string, key?: any }) => {
+  const height = Math.max(10, value);
+  return (
+    <div className="flex flex-col items-center group">
+      <div className="relative w-16 h-64 flex items-end justify-center perspective-1000">
+        <motion.div 
+          initial={{ height: 0 }}
+          animate={{ height: `${height}%` }}
+          transition={{ duration: 1, ease: "easeOut" }}
+          className={`relative w-12 transform-style-3d transition-all duration-500`}
+        >
+          {/* Front */}
+          <div className={`absolute inset-0 ${color} border-r border-black/10 shadow-inner z-20`}></div>
+          {/* Top */}
+          <div className={`absolute -top-4 left-0 w-12 h-4 ${color} brightness-125 origin-bottom transform -rotate-x-90 z-30`}></div>
+          {/* Right side */}
+          <div className={`absolute top-0 -right-4 w-4 h-full ${color} brightness-75 origin-left transform rotate-y-90 z-10`}></div>
+          
+          {/* Value Label */}
+          <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-40">
+            {value.toFixed(1)}%
+          </div>
+        </motion.div>
+      </div>
+      <p className="mt-4 text-xs font-bold text-slate-500 uppercase tracking-wider">{label}</p>
+    </div>
+  );
+};
+
 export default function Analytics({ user, token }: { user: any, token: string }) {
   const [studentData, setStudentData] = useState<any>(null);
   const [classData, setClassData] = useState<any>(null);
@@ -95,48 +124,48 @@ export default function Analytics({ user, token }: { user: any, token: string })
               <h3 className="text-lg font-bold text-slate-900 mb-8">Progresi i Performancës</h3>
               <div className="h-80">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={studentData?.logs?.map((l: any, i: number) => ({ 
-                    name: `P${i+1}`, 
-                    score: l.max_score > 0 ? (l.score / l.max_score * 100) : 0 
-                  }))}>
-                    <defs>
-                      <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.1}/>
-                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
+                  <LineChart data={(() => {
+                    const logs = studentData?.logs || [];
+                    const dataMap: any = {};
+                    logs.forEach((l: any) => {
+                      const date = new Date(l.timestamp).toLocaleDateString();
+                      if (!dataMap[date]) dataMap[date] = { date };
+                      dataMap[date][l.type] = l.score;
+                    });
+                    return Object.values(dataMap);
+                  })()}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
-                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} domain={[0, 100]} />
+                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
+                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} domain={[4, 10]} />
                     <Tooltip 
                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                     />
-                    <Area type="monotone" dataKey="score" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorScore)" />
-                  </AreaChart>
+                    <Legend />
+                    <Line type="monotone" dataKey="TEST" name="Teste" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} connectNulls />
+                    <Line type="monotone" dataKey="ASSIGNMENT" name="Detyra" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} connectNulls />
+                    <Line type="monotone" dataKey="EXAM" name="Provime" stroke="#f59e0b" strokeWidth={3} dot={{ r: 4 }} connectNulls />
+                  </LineChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
             <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
-              <h3 className="text-lg font-bold text-slate-900 mb-8">Shpërndarja sipas Kategorisë</h3>
-              <div className="h-80">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={[
-                    { name: 'Teste', value: studentData?.logs?.filter((l: any) => l.type === 'TEST').length || 0 },
-                    { name: 'Detyra', value: studentData?.logs?.filter((l: any) => l.type === 'ASSIGNMENT').length || 0 },
-                    { name: 'Pjesëmarrje', value: studentData?.attendance?.reduce((acc: number, curr: any) => acc + curr.count, 0) || 0 }
-                  ]}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
-                    <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
-                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                    <Bar dataKey="value" radius={[8, 8, 0, 0]}>
-                      {[0, 1, 2].map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={['#2563eb', '#10b981', '#f59e0b'][index]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+              <h3 className="text-lg font-bold text-slate-900 mb-8">Shpërndarja sipas Kategorisë (3D)</h3>
+              <div className="flex justify-around items-end h-80 pb-8">
+                {(() => {
+                  const data = [
+                    { name: 'Teste', value: (studentData?.logs?.filter((l: any) => l.type === 'TEST').reduce((acc: number, curr: any) => acc + (curr.score/curr.max_score), 0) / (studentData?.logs?.filter((l: any) => l.type === 'TEST').length || 1)) * 100 },
+                    { name: 'Detyra', value: (studentData?.logs?.filter((l: any) => l.type === 'ASSIGNMENT').reduce((acc: number, curr: any) => acc + (curr.score/curr.max_score), 0) / (studentData?.logs?.filter((l: any) => l.type === 'ASSIGNMENT').length || 1)) * 100 },
+                    { name: 'Provime', value: (studentData?.logs?.filter((l: any) => l.type === 'EXAM').reduce((acc: number, curr: any) => acc + (curr.score/curr.max_score), 0) / (studentData?.logs?.filter((l: any) => l.type === 'EXAM').length || 1)) * 100 },
+                    { name: 'Pjesëmarrje', value: (studentData?.attendance?.find((a: any) => a.status === 'PRESENT')?.count || 0) / 20 * 100 }
+                  ];
+                  return data.map((d, i) => {
+                    let color = 'bg-green-500';
+                    if (d.value < 50) color = 'bg-red-500';
+                    else if (d.value < 80) color = 'bg-orange-500';
+                    return <Progress3D key={i} value={d.value} label={d.name} color={color} />;
+                  });
+                })()}
               </div>
             </div>
           </div>

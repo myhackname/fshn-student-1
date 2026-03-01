@@ -1,5 +1,5 @@
 {
-  "name": "FSHN Student Platform",
-  "description": "Platformë gjithëpërfshirëse Web & Mobile për studentët e FSHN, me sisteme testimi, prezence digjitale, chat dhe analitikë.",
-  "requestFramePermissions": ["camera", "microphone"]
+  "name": "DIGITAL STUDENT FSHN",
+  "description": "Platforma Studentore - Platformë gjithëpërfshirëse për studentët e FSHN, me sisteme testimi, prezence digjitale, chat, bibliotekë dhe analitikë.",
+  "requestFramePermissions": ["camera", "microphone", "display-capture"]
 }
