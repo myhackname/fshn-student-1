@@ -65,6 +65,8 @@ const useAuth = () => {
 
 // --- Components ---
 
+import MotionLogo from './components/MotionLogo';
+
 const Sidebar = ({ role }: { role: Role }) => {
   const { logout } = useAuth();
   const menuItems = [
@@ -133,9 +135,12 @@ const Header = () => {
               <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">{user?.role}</p>
             </div>
             <div className="relative">
-              <div className="w-8 h-8 md:w-10 md:h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xs md:text-base overflow-hidden border-2 border-transparent group-hover:border-blue-400 transition-all">
-                <img src={logoUrl} alt="Logo" className="w-full h-full object-cover" />
-              </div>
+              <MotionLogo size="md" />
+              {user?.email_verified && (
+                <div className="absolute -bottom-1 -right-1 bg-green-500 text-white rounded-full p-0.5 border-2 border-white">
+                  <CheckCircle size={10} fill="currentColor" />
+                </div>
+              )}
             </div>
           </Link>
           <button 
@@ -228,11 +233,15 @@ const LoginPage = () => {
   };
 
   return (
-    <div 
-      className="min-h-screen flex items-center justify-center p-4 bg-cover bg-center bg-no-repeat"
-      style={{ backgroundImage: 'url("https://i.ibb.co/zVR0s1DK/1695809497396.jpg")' }}
-    >
-      <div className="absolute inset-0 bg-slate-900/40"></div>
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        <iframe 
+          src="https://streamable.com/e/0n9o2f?autoplay=1&muted=1&loop=1&controls=0" 
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[177.77vh] h-[56.25vw] min-w-full min-h-full border-none"
+          allow="autoplay; fullscreen"
+        ></iframe>
+      </div>
+      <div className="absolute inset-0 bg-slate-900/50 z-10"></div>
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -353,11 +362,15 @@ const ForgotPasswordPage = () => {
   };
 
   return (
-    <div 
-      className="min-h-screen flex items-center justify-center p-4 bg-cover bg-center bg-no-repeat"
-      style={{ backgroundImage: 'url("https://i.ibb.co/zVR0s1DK/1695809497396.jpg")' }}
-    >
-      <div className="absolute inset-0 bg-slate-900/40"></div>
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        <iframe 
+          src="https://streamable.com/e/0n9o2f?autoplay=1&muted=1&loop=1&controls=0" 
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[177.77vh] h-[56.25vw] min-w-full min-h-full border-none"
+          allow="autoplay; fullscreen"
+        ></iframe>
+      </div>
+      <div className="absolute inset-0 bg-slate-900/50 z-10"></div>
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -444,11 +457,15 @@ const ResetPasswordPage = () => {
   if (!token) return <Navigate to="/login" />;
 
   return (
-    <div 
-      className="min-h-screen flex items-center justify-center p-4 bg-cover bg-center bg-no-repeat"
-      style={{ backgroundImage: 'url("https://i.ibb.co/zVR0s1DK/1695809497396.jpg")' }}
-    >
-      <div className="absolute inset-0 bg-slate-900/40"></div>
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        <iframe 
+          src="https://streamable.com/e/0n9o2f?autoplay=1&muted=1&loop=1&controls=0" 
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[177.77vh] h-[56.25vw] min-w-full min-h-full border-none"
+          allow="autoplay; fullscreen"
+        ></iframe>
+      </div>
+      <div className="absolute inset-0 bg-slate-900/50 z-10"></div>
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -581,11 +598,15 @@ const RegisterPage = () => {
   };
 
   return (
-    <div 
-      className="min-h-screen flex items-center justify-center p-4 bg-cover bg-center bg-no-repeat"
-      style={{ backgroundImage: 'url("https://i.ibb.co/zVR0s1DK/1695809497396.jpg")' }}
-    >
-      <div className="absolute inset-0 bg-slate-900/40"></div>
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        <iframe 
+          src="https://streamable.com/e/0n9o2f?autoplay=1&muted=1&loop=1&controls=0" 
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[177.77vh] h-[56.25vw] min-w-full min-h-full border-none"
+          allow="autoplay; fullscreen"
+        ></iframe>
+      </div>
+      <div className="absolute inset-0 bg-slate-900/50 z-10"></div>
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -784,11 +805,23 @@ const ProfilePage = () => {
     <div className="max-w-2xl mx-auto">
       <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-8">
         <div className="flex items-center space-x-6 mb-8">
-          <div className="w-24 h-24 bg-blue-100 rounded-3xl overflow-hidden border-4 border-white shadow-lg">
-            <img src="https://i.ibb.co/LdsTzhWj/IMG-3202.png" alt="Logo" className="w-full h-full object-cover" />
+          <div className="relative">
+            <MotionLogo size="xl" />
+            {user?.email_verified && (
+              <div className="absolute -bottom-2 -right-2 bg-green-500 text-white rounded-full p-1.5 border-4 border-white shadow-lg">
+                <CheckCircle size={20} fill="currentColor" />
+              </div>
+            )}
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-slate-900">Profili im</h2>
+            <div className="flex items-center space-x-2">
+              <h2 className="text-2xl font-bold text-slate-900">Profili im</h2>
+              {user?.email_verified && (
+                <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center">
+                  <CheckCircle size={10} className="mr-1" /> Verifikuar
+                </span>
+              )}
+            </div>
             <p className="text-slate-500">Menaxhoni të dhënat tuaja personale</p>
           </div>
         </div>
@@ -819,12 +852,40 @@ const ProfilePage = () => {
           
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">Email (Nuk mund të ndryshohet)</label>
-            <input 
-              type="email" 
-              value={user?.email}
-              disabled
-              className="w-full p-3 rounded-xl border border-slate-100 bg-slate-50 text-slate-400 outline-none cursor-not-allowed"
-            />
+            <div className="flex space-x-2">
+              <input 
+                type="email" 
+                value={user?.email}
+                disabled
+                className="flex-1 p-3 rounded-xl border border-slate-100 bg-slate-50 text-slate-400 outline-none cursor-not-allowed"
+              />
+              {!user?.email_verified && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setLoading(true);
+                    try {
+                      const res = await fetch('/api/user/verify-email', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                      });
+                      if (res.ok) {
+                        await refreshUser();
+                        setMessage('Emaili u verifikua me sukses!');
+                        setTimeout(() => setMessage(''), 3000);
+                      }
+                    } catch (e) {
+                      console.error(e);
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  className="px-4 py-2 bg-green-600 text-white rounded-xl font-bold text-xs hover:bg-green-700 transition-all"
+                >
+                  Verifiko
+                </button>
+              )}
+            </div>
           </div>
 
           <div>
@@ -1138,13 +1199,21 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-8">
+      {/* Email Verification Banner */}
+      {!user?.email_verified && (
+        <div className="bg-green-50 border border-green-100 p-4 rounded-2xl flex items-center space-x-3 text-green-700 font-medium">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <p>Ju tashmë jeni regjistruar, të lutem verifiko emailin.</p>
+        </div>
+      )}
+
       {/* User Info Banner */}
       <div className="bg-blue-600 rounded-3xl p-8 text-white shadow-lg shadow-blue-200 relative overflow-hidden">
         <div className="relative z-10">
           <h2 className="text-3xl font-bold mb-2">Përshëndetje, {user?.name}!</h2>
           <p className="text-blue-100 opacity-90">
             {user?.role === 'STUDENT' 
-              ? `${user.program} • ${user.year}` 
+              ? `${user?.program} • ${user?.year}` 
               : 'Paneli i Menaxhimit të Mësuesit'}
           </p>
         </div>
@@ -1228,14 +1297,17 @@ const Dashboard = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {pendingStudents.map(student => (
               <div key={student.id} className="bg-white p-4 rounded-2xl border border-amber-200 flex flex-col justify-between">
-                <div>
-                  <p className="font-bold text-slate-900">{student.name} {student.surname}</p>
-                  <p className="text-xs text-slate-500 mb-2">{student.email}</p>
-                  <p className="text-xs font-medium text-amber-700 bg-amber-100 inline-block px-2 py-1 rounded">
-                    {student.class_name}
-                  </p>
+                <div className="flex items-center space-x-4 mb-4">
+                  <MotionLogo size="sm" />
+                  <div>
+                    <p className="font-bold text-slate-900">{student.name} {student.surname}</p>
+                    <p className="text-xs text-slate-500">{student.email}</p>
+                    <p className="text-xs font-medium text-amber-700 bg-amber-100 inline-block px-2 py-1 rounded mt-1">
+                      {student.class_name}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex gap-2 mt-4">
+                <div className="flex gap-2">
                   <button 
                     onClick={() => handleApprove(student.id, 'CONFIRMED')}
                     className="flex-1 bg-green-600 text-white py-2 rounded-xl text-xs font-bold hover:bg-green-700 transition-all"

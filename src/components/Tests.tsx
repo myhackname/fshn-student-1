@@ -5,6 +5,7 @@ import {
   Play, Pause, Send, Eye, BarChart2, ChevronRight, 
   Trash2, Save, Check, X, ArrowLeft, Timer
 } from 'lucide-react';
+import MotionLogo from './MotionLogo';
 import { Test, Question, TestAttempt, TestAnswer } from '../types';
 import { io, Socket } from 'socket.io-client';
 
@@ -132,7 +133,8 @@ export default function Tests({ user, token }: { user: any, token: string }) {
       totalPoints: parseInt(formData.get('totalPoints') as string),
       testDate: formData.get('testDate'),
       program: formData.get('program'),
-      year: formData.get('year')
+      year: formData.get('year'),
+      group_name: formData.get('group_name')
     };
 
     const res = await fetch('/api/tests', {
@@ -566,26 +568,39 @@ export default function Tests({ user, token }: { user: any, token: string }) {
                   <label className="block text-sm font-medium text-slate-700 mb-1">Përshkrimi</label>
                   <textarea name="description" className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none h-24" />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Dega</label>
-                  <select name="program" required className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none">
-                    <option value="Fizikë">Fizikë</option>
-                    <option value="Biologji">Biologji</option>
-                    <option value="Kimi">Kimi</option>
-                    <option value="Informatikë">Informatikë</option>
-                    <option value="Matematikë">Matematikë</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Viti</label>
-                  <select name="year" required className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none">
-                    <option value="Viti 1">Viti 1</option>
-                    <option value="Viti 2">Viti 2</option>
-                    <option value="Viti 3">Viti 3</option>
-                    <option value="Master Shkencor">Master Shkencor</option>
-                    <option value="Master Profesional">Master Profesional</option>
-                  </select>
-                </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Dega</label>
+                    <select name="program" required className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none">
+                      <option value="BIOLOGJI">BIOLOGJI</option>
+                      <option value="BIOTEKNOLOGJI">BIOTEKNOLOGJI</option>
+                      <option value="KIMI">KIMI</option>
+                      <option value="KIMI INDUSTRIALE DHE MJEDISORE">KIMI INDUSTRIALE DHE MJEDISORE</option>
+                      <option value="FIZIKE">FIZIKE</option>
+                      <option value="FIZIKE DHE SHKENCA KOMPJUTERIKE">FIZIKE DHE SHKENCA KOMPJUTERIKE</option>
+                      <option value="MATEMATIKE">MATEMATIKE</option>
+                      <option value="MATEMATIKE INFORMATIK">MATEMATIKE INFORMATIK</option>
+                      <option value="TEKNOLOGJI INFORMACIONI DHE KOMUNIKIMI">TEKNOLOGJI INFORMACIONI DHE KOMUNIKIMI</option>
+                      <option value="STATISTIKE">STATISTIKE</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Viti</label>
+                    <select name="year" required className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none">
+                      <option value="VITI 1 BACHELORE">VITI 1 BACHELORE</option>
+                      <option value="VITI 2 BACHELORE">VITI 2 BACHELORE</option>
+                      <option value="VITI 3 BACHELORE">VITI 3 BACHELORE</option>
+                      <option value="VITI 1 MASTER">VITI 1 MASTER</option>
+                      <option value="VITI 2 MASTER">VITI 2 MASTER</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Grupi</label>
+                    <select name="group_name" required className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none">
+                      <option value="A">Grupi A</option>
+                      <option value="B">Grupi B</option>
+                      <option value="C">Grupi C</option>
+                    </select>
+                  </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Data</label>
                   <input name="testDate" type="datetime-local" required className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none" />
@@ -642,9 +657,7 @@ export default function Tests({ user, token }: { user: any, token: string }) {
                     {monitoringData.map((p, idx) => (
                       <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
                         <div className="flex items-center space-x-4">
-                          <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold">
-                            {p.name[0]}
-                          </div>
+                          <MotionLogo size="sm" />
                           <div>
                             <p className="font-bold text-slate-900">{p.name}</p>
                             <p className="text-xs text-slate-500">Filluar: {new Date(p.start_time).toLocaleTimeString()}</p>

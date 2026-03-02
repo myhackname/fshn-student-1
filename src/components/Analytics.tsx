@@ -8,6 +8,7 @@ import {
   TrendingUp, Users, BookOpen, Clock, Target, 
   Award, Calendar, ChevronRight, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
+import MotionLogo from './MotionLogo';
 
 const Progress3D = ({ value, label, color }: { value: number, label: string, color: string, key?: any }) => {
   const height = Math.max(10, value);
@@ -234,9 +235,7 @@ export default function Analytics({ user, token }: { user: any, token: string })
                 {classData?.topImprovers?.map((student: any, idx: number) => (
                   <div key={idx} className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-slate-100 text-slate-600 rounded-full flex items-center justify-center font-bold">
-                        {student.name[0]}
-                      </div>
+                      <MotionLogo size="sm" />
                       <div>
                         <p className="font-bold text-slate-900 text-sm">{student.name}</p>
                         <p className="text-xs text-slate-500">Performanca: {(student.avg_perf * 100).toFixed(1)}%</p>

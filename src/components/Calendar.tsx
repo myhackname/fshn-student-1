@@ -17,8 +17,16 @@ interface Schedule {
 }
 
 const DAYS = ['E Hënë', 'E Martë', 'E Mërkurë', 'E Enjte', 'E Premte', 'E Shtunë'];
-const PROGRAMS = ['Fizikë', 'Biologji', 'Kimi', 'Informatikë', 'Matematikë', 'Tjetër'];
-const YEARS = ['Viti 1', 'Viti 2', 'Viti 3', 'Master Shkencor', 'Master Profesional'];
+const PROGRAMS = [
+  "BIOLOGJI", "BIOTEKNOLOGJI", "KIMI", "KIMI INDUSTRIALE DHE MJEDISORE",
+  "FIZIKE", "FIZIKE DHE SHKENCA KOMPJUTERIKE", "MATEMATIKE",
+  "MATEMATIKE INFORMATIK", "TEKNOLOGJI INFORMACIONI DHE KOMUNIKIMI", "STATISTIKE", "Tjetër"
+];
+const YEARS = [
+  "VITI 1 BACHELORE", "VITI 2 BACHELORE", "VITI 3 BACHELORE",
+  "VITI 1 MASTER", "VITI 2 MASTER"
+];
+const GROUPS = ['A', 'B', 'C'];
 const BUILDINGS = ['A', 'B', 'C', 'D'];
 
 export default function Calendar({ user, token }: { user: User | null, token: string }) {
@@ -29,9 +37,10 @@ export default function Calendar({ user, token }: { user: User | null, token: st
     day_of_week: 'E Hënë',
     start_time: '08:00',
     end_time: '09:00',
-    program: 'Fizikë',
+    program: 'BIOLOGJI',
     custom_program: '',
-    year: 'Viti 1',
+    year: 'VITI 1 BACHELORE',
+    group_name: 'A',
     building: 'A',
     classroom: ''
   });
@@ -241,6 +250,18 @@ export default function Calendar({ user, token }: { user: User | null, token: st
                       {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Grupi</label>
+                    <select
+                      value={(newSchedule as any).group_name}
+                      onChange={e => setNewSchedule({ ...newSchedule, group_name: e.target.value })}
+                      className="w-full p-2 rounded-lg border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      {GROUPS.map(g => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Godina</label>
                     <select

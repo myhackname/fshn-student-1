@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { Send, User, Hash, Search, MoreVertical } from 'lucide-react';
+import MotionLogo from './MotionLogo';
 import { io, Socket } from 'socket.io-client';
 import { Message } from '../types';
 
@@ -34,8 +35,11 @@ export default function Chat({ user, token }: { user: any, token: string }) {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
-      setMessages(data);
-    } catch (e) { console.error(e); }
+      setMessages(Array.isArray(data) ? data : []);
+    } catch (e) { 
+      console.error(e);
+      setMessages([]);
+    }
   };
 
   const filterProfanity = (text: string) => {
@@ -130,7 +134,8 @@ export default function Chat({ user, token }: { user: any, token: string }) {
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.senderId === user.id ? 'justify-end' : 'justify-start'}`}>
+            <div key={i} className={`flex items-end space-x-2 ${msg.senderId === user.id ? 'justify-end' : 'justify-start'}`}>
+              {msg.senderId !== user.id && <MotionLogo size="sm" />}
               <div className={`max-w-[70%] ${msg.senderId === user.id ? 'order-1' : 'order-2'}`}>
                 <div className={`p-4 rounded-2xl shadow-sm ${
                   msg.senderId === user.id 
@@ -146,6 +151,7 @@ export default function Chat({ user, token }: { user: any, token: string }) {
                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
+              {msg.senderId === user.id && <MotionLogo size="sm" />}
             </div>
           ))}
           <div ref={scrollRef} />

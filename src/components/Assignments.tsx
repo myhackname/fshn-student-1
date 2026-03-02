@@ -5,6 +5,7 @@ import {
   Clock, CheckCircle, Upload, File, BarChart2, 
   AlertCircle, TrendingUp, Check, X, Download, Eye
 } from 'lucide-react';
+import MotionLogo from './MotionLogo';
 import { Assignment, Submission } from '../types';
 
 export default function Assignments({ user, token }: { user: any, token: string }) {
@@ -21,7 +22,10 @@ export default function Assignments({ user, token }: { user: any, token: string 
     materials: '',
     maxPoints: 100,
     submissionType: 'BOTH' as 'FILE' | 'TEXT' | 'BOTH',
-    status: 'DRAFT' as 'DRAFT' | 'PUBLISHED'
+    status: 'DRAFT' as 'DRAFT' | 'PUBLISHED',
+    program: 'BIOLOGJI',
+    year: 'VITI 1 BACHELORE',
+    group_name: 'A'
   });
   const [mySubmissions, setMySubmissions] = useState<Submission[]>([]);
   const [view, setView] = useState<'LIST' | 'ANALYTICS'>('LIST');
@@ -70,7 +74,8 @@ export default function Assignments({ user, token }: { user: any, token: string 
       setShowCreateModal(false);
       setNewAssignment({ 
         title: '', description: '', deadline: '', materials: '', 
-        maxPoints: 100, submissionType: 'BOTH', status: 'DRAFT' 
+        maxPoints: 100, submissionType: 'BOTH', status: 'DRAFT',
+        program: 'BIOLOGJI', year: 'VITI 1 BACHELORE', group_name: 'A'
       });
       fetchAssignments();
     }
@@ -398,6 +403,51 @@ export default function Assignments({ user, token }: { user: any, token: string 
                     </select>
                   </div>
                   <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Dega</label>
+                    <select 
+                      value={newAssignment.program}
+                      onChange={(e) => setNewAssignment({...newAssignment, program: e.target.value})}
+                      className="w-full p-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                    >
+                      <option value="BIOLOGJI">BIOLOGJI</option>
+                      <option value="BIOTEKNOLOGJI">BIOTEKNOLOGJI</option>
+                      <option value="KIMI">KIMI</option>
+                      <option value="KIMI INDUSTRIALE DHE MJEDISORE">KIMI INDUSTRIALE DHE MJEDISORE</option>
+                      <option value="FIZIKE">FIZIKE</option>
+                      <option value="FIZIKE DHE SHKENCA KOMPJUTERIKE">FIZIKE DHE SHKENCA KOMPJUTERIKE</option>
+                      <option value="MATEMATIKE">MATEMATIKE</option>
+                      <option value="MATEMATIKE INFORMATIK">MATEMATIKE INFORMATIK</option>
+                      <option value="TEKNOLOGJI INFORMACIONI DHE KOMUNIKIMI">TEKNOLOGJI INFORMACIONI DHE KOMUNIKIMI</option>
+                      <option value="STATISTIKE">STATISTIKE</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Viti</label>
+                    <select 
+                      value={newAssignment.year}
+                      onChange={(e) => setNewAssignment({...newAssignment, year: e.target.value})}
+                      className="w-full p-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                    >
+                      <option value="VITI 1 BACHELORE">VITI 1 BACHELORE</option>
+                      <option value="VITI 2 BACHELORE">VITI 2 BACHELORE</option>
+                      <option value="VITI 3 BACHELORE">VITI 3 BACHELORE</option>
+                      <option value="VITI 1 MASTER">VITI 1 MASTER</option>
+                      <option value="VITI 2 MASTER">VITI 2 MASTER</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Grupi</label>
+                    <select 
+                      value={newAssignment.group_name}
+                      onChange={(e) => setNewAssignment({...newAssignment, group_name: e.target.value})}
+                      className="w-full p-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                    >
+                      <option value="A">Grupi A</option>
+                      <option value="B">Grupi B</option>
+                      <option value="C">Grupi C</option>
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-sm font-bold text-slate-700 mb-2">Statusi Fillestar</label>
                     <select 
                       value={newAssignment.status}
@@ -497,9 +547,7 @@ export default function Assignments({ user, token }: { user: any, token: string 
                       <div key={sub.id} className="p-6 rounded-2xl border border-slate-100 bg-slate-50/50 space-y-4">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-3">
-                            <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold">
-                              {sub.student_name?.[0]}
-                            </div>
+                            <MotionLogo size="sm" />
                             <div>
                               <p className="font-bold text-slate-900">{sub.student_name}</p>
                               <div className="flex items-center space-x-2">

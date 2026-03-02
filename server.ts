@@ -38,6 +38,7 @@ db.exec(`
     is_confirmed BOOLEAN DEFAULT 0,
     class_code TEXT,
     profile_photo TEXT,
+    email_verified BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -262,6 +263,7 @@ if (!userColumnNames.includes('program')) db.prepare("ALTER TABLE users ADD COLU
 if (!userColumnNames.includes('year')) db.prepare("ALTER TABLE users ADD COLUMN year TEXT").run();
 if (!userColumnNames.includes('is_confirmed')) db.prepare("ALTER TABLE users ADD COLUMN is_confirmed BOOLEAN DEFAULT 0").run();
 if (!userColumnNames.includes('profile_photo')) db.prepare("ALTER TABLE users ADD COLUMN profile_photo TEXT").run();
+if (!userColumnNames.includes('email_verified')) db.prepare("ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT 0").run();
 
 const classColumns = db.prepare("PRAGMA table_info(classes)").all() as any[];
 const classColumnNames = classColumns.map(c => c.name);
@@ -284,6 +286,7 @@ const testColumns = db.prepare("PRAGMA table_info(tests)").all() as any[];
 const testColumnNames = testColumns.map(c => c.name);
 if (!testColumnNames.includes('program')) db.prepare("ALTER TABLE tests ADD COLUMN program TEXT").run();
 if (!testColumnNames.includes('year')) db.prepare("ALTER TABLE tests ADD COLUMN year TEXT").run();
+if (!testColumnNames.includes('group_name')) db.prepare("ALTER TABLE tests ADD COLUMN group_name TEXT").run();
 
 const attemptColumns = db.prepare("PRAGMA table_info(test_attempts)").all() as any[];
 const attemptColumnNames = attemptColumns.map(c => c.name);
@@ -296,6 +299,10 @@ if (!submissionColumnNames.includes('grade')) db.prepare("ALTER TABLE submission
 const msgColumns = db.prepare("PRAGMA table_info(messages)").all() as any[];
 const msgColumnNames = msgColumns.map(c => c.name);
 if (!msgColumnNames.includes('chat_type')) db.prepare("ALTER TABLE messages ADD COLUMN chat_type TEXT CHECK(chat_type IN ('PRIVATE', 'CLASS', 'SCHOOL')) DEFAULT 'CLASS'").run();
+
+const scheduleColumns = db.prepare("PRAGMA table_info(schedules)").all() as any[];
+const scheduleColumnNames = scheduleColumns.map(c => c.name);
+if (!scheduleColumnNames.includes('group_name')) db.prepare("ALTER TABLE schedules ADD COLUMN group_name TEXT").run();
 
 const columns = db.prepare("PRAGMA table_info(assignments)").all() as any[];
 const columnNames = columns.map(c => c.name);
@@ -312,6 +319,9 @@ if (!columnNames.includes('submission_type')) {
 if (!columnNames.includes('status')) {
   db.prepare("ALTER TABLE assignments ADD COLUMN status TEXT CHECK(status IN ('DRAFT', 'PUBLISHED', 'ARCHIVED')) DEFAULT 'DRAFT'").run();
 }
+if (!columnNames.includes('program')) db.prepare("ALTER TABLE assignments ADD COLUMN program TEXT").run();
+if (!columnNames.includes('year')) db.prepare("ALTER TABLE assignments ADD COLUMN year TEXT").run();
+if (!columnNames.includes('group_name')) db.prepare("ALTER TABLE assignments ADD COLUMN group_name TEXT").run();
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS study_sessions (
@@ -340,6 +350,7 @@ db.exec(`
     end_time TEXT NOT NULL,
     program TEXT NOT NULL,
     year TEXT NOT NULL,
+    group_name TEXT,
     building TEXT NOT NULL,
     classroom TEXT NOT NULL,
     FOREIGN KEY(teacher_id) REFERENCES users(id)
@@ -569,6 +580,7 @@ async function startServer() {
           phone: userDetails.phone,
           profile_photo: userDetails.profile_photo,
           is_confirmed: userDetails.is_confirmed,
+          email_verified: userDetails.email_verified,
           class_status: userDetails.class_status,
           is_class_admin: userDetails.is_class_admin
         } 
@@ -615,6 +627,7 @@ async function startServer() {
           phone: userDetails.phone,
           profile_photo: userDetails.profile_photo,
           is_confirmed: userDetails.is_confirmed,
+          email_verified: userDetails.email_verified,
           class_status: userDetails.class_status,
           is_class_admin: userDetails.is_class_admin
         } 
@@ -813,6 +826,7 @@ async function startServer() {
 
   app.get("/api/student/class-status", authenticate, (req: any, res) => {
     const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(req.user.id) as any;
+    if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
     const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
       .get(user.program, user.year, user.group_name, user.study_type) as any;
     
@@ -849,9 +863,18 @@ async function startServer() {
     }
   });
 
+  app.post("/api/user/verify-email", authenticate, (req: any, res) => {
+    try {
+      db.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").run(req.user.id);
+      res.json({ success: true, message: "Emaili u verifikua me sukses!" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/user/me", authenticate, (req: any, res) => {
     const user = db.prepare(`
-      SELECT u.id, u.name, u.surname, u.email, u.role, u.class_code, u.program, u.year, u.group_name, u.study_type, u.phone, u.bio, u.profile_photo, u.is_confirmed,
+      SELECT u.id, u.name, u.surname, u.email, u.role, u.class_code, u.program, u.year, u.group_name, u.study_type, u.phone, u.bio, u.profile_photo, u.is_confirmed, u.email_verified,
              cm.status as class_status, cm.is_admin as is_class_admin
       FROM users u
       LEFT JOIN class_members cm ON u.id = cm.user_id
@@ -924,19 +947,20 @@ async function startServer() {
     if (req.user.role === 'TEACHER') {
       tests = db.prepare("SELECT * FROM tests WHERE teacher_id = ? ORDER BY created_at DESC").all(req.user.id);
     } else {
-      tests = db.prepare("SELECT * FROM tests WHERE status IN ('ACTIVE', 'IN_PROGRESS', 'PUBLISHED') ORDER BY created_at DESC").all();
+      tests = db.prepare("SELECT * FROM tests WHERE status IN ('ACTIVE', 'IN_PROGRESS', 'PUBLISHED') AND program = ? AND year = ? AND group_name = ? ORDER BY created_at DESC")
+        .all(req.user.program, req.user.year, req.user.group_name);
     }
     res.json(tests);
   });
 
   app.post("/api/tests", authenticate, (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të krijojnë teste" });
-    const { title, description, duration, totalPoints, testDate, program, year } = req.body;
-    const info = db.prepare("INSERT INTO tests (title, description, duration, total_points, teacher_id, test_date, program, year, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')")
-      .run(title, description, duration, totalPoints, req.user.id, testDate, program, year);
+    const { title, description, duration, totalPoints, testDate, program, year, group_name } = req.body;
+    const info = db.prepare("INSERT INTO tests (title, description, duration, total_points, teacher_id, test_date, program, year, group_name, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')")
+      .run(title, description, duration, totalPoints, req.user.id, testDate, program, year, group_name);
     
-    // Notify students of this program and year
-    const students = db.prepare("SELECT id FROM users WHERE role = 'STUDENT' AND program = ? AND year = ?").all(program, year) as any[];
+    // Notify students of this program, year and group
+    const students = db.prepare("SELECT id FROM users WHERE role = 'STUDENT' AND program = ? AND year = ? AND group_name = ?").all(program, year, group_name) as any[];
     for (const student of students) {
       db.prepare("INSERT INTO notifications (user_id, title, content, type) VALUES (?, ?, ?, 'TEST')")
         .run(student.id, "Test i Ri: " + title, `Mësuesi ${req.user.name} ka caktuar një test për datën ${testDate}.`, 'TEST');
@@ -1238,22 +1262,33 @@ async function startServer() {
 
   // Assignments
   app.get("/api/assignments", authenticate, (req: any, res) => {
-    const assignments = db.prepare(`
-      SELECT a.*, u.name as teacher_name 
-      FROM assignments a 
-      JOIN users u ON a.teacher_id = u.id
-    `).all();
+    let assignments;
+    if (req.user.role === 'TEACHER') {
+      assignments = db.prepare(`
+        SELECT a.*, u.name as teacher_name 
+        FROM assignments a 
+        JOIN users u ON a.teacher_id = u.id
+        WHERE a.teacher_id = ?
+      `).all(req.user.id);
+    } else {
+      assignments = db.prepare(`
+        SELECT a.*, u.name as teacher_name 
+        FROM assignments a 
+        JOIN users u ON a.teacher_id = u.id
+        WHERE a.status = 'PUBLISHED' AND a.program = ? AND a.year = ? AND a.group_name = ?
+      `).all(req.user.program, req.user.year, req.user.group_name);
+    }
     res.json(assignments);
   });
 
   app.post("/api/assignments", authenticate, (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të krijojnë detyra" });
-    const { title, description, deadline, materials, maxPoints, submissionType, status } = req.body;
-    const info = db.prepare("INSERT INTO assignments (title, description, deadline, materials, max_points, submission_type, status, teacher_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(title, description, deadline, materials, maxPoints || 100, submissionType || 'BOTH', status || 'DRAFT', req.user.id);
+    const { title, description, deadline, materials, maxPoints, submissionType, status, program, year, group_name } = req.body;
+    const info = db.prepare("INSERT INTO assignments (title, description, deadline, materials, max_points, submission_type, status, teacher_id, program, year, group_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(title, description, deadline, materials, maxPoints || 100, submissionType || 'BOTH', status || 'DRAFT', req.user.id, program, year, group_name);
     
     if (status === 'PUBLISHED') {
-      io.emit("new_assignment", { title, teacherName: req.user.name });
+      io.emit("new_assignment", { title, teacherName: req.user.name, program, year, group_name });
     }
     
     res.json({ id: info.lastInsertRowid });
@@ -1290,6 +1325,7 @@ async function startServer() {
 
     if (type === 'CLASS') {
       const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(req.user.id) as any;
+      if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
       const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
         .get(user.program, user.year, user.group_name, user.study_type) as any;
       
@@ -1360,6 +1396,7 @@ async function startServer() {
   // Digital Library
   app.get("/api/library/books", authenticate, (req: any, res) => {
     const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(req.user.id) as any;
+    if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
     const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
       .get(user.program, user.year, user.group_name, user.study_type) as any;
     
@@ -1410,25 +1447,25 @@ async function startServer() {
     if (req.user.role === 'TEACHER') {
       schedules = db.prepare("SELECT * FROM schedules WHERE teacher_id = ?").all(req.user.id);
     } else {
-      // For students, filter by their program and year
-      const user = db.prepare("SELECT program, year FROM users WHERE id = ?").get(req.user.id) as any;
+      // For students, filter by their program, year and group
+      const user = db.prepare("SELECT program, year, group_name FROM users WHERE id = ?").get(req.user.id) as any;
       schedules = db.prepare(`
         SELECT s.*, u.name as teacher_name 
         FROM schedules s 
         JOIN users u ON s.teacher_id = u.id 
-        WHERE s.program = ? AND s.year = ?
-      `).all(user.program, user.year);
+        WHERE s.program = ? AND s.year = ? AND s.group_name = ?
+      `).all(user.program, user.year, user.group_name);
     }
     res.json(schedules);
   });
 
   app.post("/api/schedules", authenticate, (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
-    const { day_of_week, start_time, end_time, program, year, building, classroom } = req.body;
+    const { day_of_week, start_time, end_time, program, year, group_name, building, classroom } = req.body;
     const info = db.prepare(`
-      INSERT INTO schedules (teacher_id, day_of_week, start_time, end_time, program, year, building, classroom) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.user.id, day_of_week, start_time, end_time, program, year, building, classroom);
+      INSERT INTO schedules (teacher_id, day_of_week, start_time, end_time, program, year, group_name, building, classroom) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.user.id, day_of_week, start_time, end_time, program, year, group_name, building, classroom);
     res.json({ id: info.lastInsertRowid });
   });
 
@@ -1469,11 +1506,13 @@ async function startServer() {
       
       if (userData.role === 'STUDENT') {
         const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(userData.id) as any;
-        const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
-          .get(user.program, user.year, user.group_name, user.study_type) as any;
-        
-        if (classroom) {
-          socket.join(`class_${classroom.id}`);
+        if (user) {
+          const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
+            .get(user.program, user.year, user.group_name, user.study_type) as any;
+          
+          if (classroom) {
+            socket.join(`class_${classroom.id}`);
+          }
         }
       }
       
@@ -1484,9 +1523,11 @@ async function startServer() {
       let classId = null;
       if (msg.chatType === 'CLASS') {
         const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(msg.senderId) as any;
-        const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
-          .get(user.program, user.year, user.group_name, user.study_type) as any;
-        classId = classroom?.id;
+        if (user) {
+          const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
+            .get(user.program, user.year, user.group_name, user.study_type) as any;
+          classId = classroom?.id;
+        }
       }
 
       db.prepare("INSERT INTO messages (sender_id, content, chat_type, class_id) VALUES (?, ?, ?, ?)")

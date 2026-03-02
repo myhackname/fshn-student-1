@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { CheckCircle, XCircle, UserCheck, Users } from 'lucide-react';
+import MotionLogo from './MotionLogo';
 import { io, Socket } from 'socket.io-client';
 
 export default function Attendance({ user, token }: { user: any, token: string }) {
@@ -134,9 +135,7 @@ export default function Attendance({ user, token }: { user: any, token: string }
               activeSession.presence.map((p: any) => (
                 <div key={p.userId} className="flex items-center justify-between p-4 rounded-2xl border border-slate-50 bg-slate-50/30">
                   <div className="flex items-center space-x-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${p.is_verified ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600'}`}>
-                      {p.userName[0]}
-                    </div>
+                    <MotionLogo size="sm" />
                     <div>
                       <p className="text-sm font-bold text-slate-900">{p.userName}</p>
                       <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">

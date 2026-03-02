@@ -16,6 +16,7 @@ export interface User {
   study_type?: string;
   is_class_admin?: boolean;
   is_confirmed?: boolean;
+  email_verified?: boolean;
 }
 
 export interface Message {
