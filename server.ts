@@ -39,6 +39,7 @@ db.exec(`
     class_code TEXT,
     profile_photo TEXT,
     email_verified BOOLEAN DEFAULT 0,
+    email_verified_shown BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -249,6 +250,52 @@ db.exec(`
     FOREIGN KEY(assignment_id) REFERENCES assignments(id),
     FOREIGN KEY(student_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS study_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teacher_id INTEGER,
+    class_id INTEGER,
+    subject TEXT,
+    duration INTEGER, -- minutes
+    status TEXT CHECK(status IN ('ACTIVE', 'COMPLETED')) DEFAULT 'ACTIVE',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(teacher_id) REFERENCES users(id),
+    FOREIGN KEY(class_id) REFERENCES classes(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS session_presence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER,
+    user_id INTEGER,
+    is_verified BOOLEAN DEFAULT 0,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(session_id) REFERENCES study_sessions(id),
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    teacher_id INTEGER,
+    day_of_week TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    program TEXT NOT NULL,
+    year TEXT NOT NULL,
+    group_name TEXT,
+    building TEXT NOT NULL,
+    classroom TEXT NOT NULL,
+    FOREIGN KEY(teacher_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS performance_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    type TEXT CHECK(type IN ('TEST', 'ASSIGNMENT', 'ATTENDANCE')),
+    score REAL,
+    max_score REAL,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
 `);
 
 // Migration: Add missing columns if they don't exist
@@ -264,6 +311,7 @@ if (!userColumnNames.includes('year')) db.prepare("ALTER TABLE users ADD COLUMN 
 if (!userColumnNames.includes('is_confirmed')) db.prepare("ALTER TABLE users ADD COLUMN is_confirmed BOOLEAN DEFAULT 0").run();
 if (!userColumnNames.includes('profile_photo')) db.prepare("ALTER TABLE users ADD COLUMN profile_photo TEXT").run();
 if (!userColumnNames.includes('email_verified')) db.prepare("ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT 0").run();
+if (!userColumnNames.includes('email_verified_shown')) db.prepare("ALTER TABLE users ADD COLUMN email_verified_shown BOOLEAN DEFAULT 0").run();
 
 const classColumns = db.prepare("PRAGMA table_info(classes)").all() as any[];
 const classColumnNames = classColumns.map(c => c.name);
@@ -272,6 +320,12 @@ if (!classColumnNames.includes('year')) db.prepare("ALTER TABLE classes ADD COLU
 if (!classColumnNames.includes('group_name')) db.prepare("ALTER TABLE classes ADD COLUMN group_name TEXT").run();
 if (!classColumnNames.includes('study_type')) db.prepare("ALTER TABLE classes ADD COLUMN study_type TEXT").run();
 if (!classColumnNames.includes('admin_id')) db.prepare("ALTER TABLE classes ADD COLUMN admin_id INTEGER").run();
+
+const studySessionColumns = db.prepare("PRAGMA table_info(study_sessions)").all() as any[];
+const studySessionColumnNames = studySessionColumns.map(c => c.name);
+if (!studySessionColumnNames.includes('class_id')) db.prepare("ALTER TABLE study_sessions ADD COLUMN class_id INTEGER").run();
+if (!studySessionColumnNames.includes('subject')) db.prepare("ALTER TABLE study_sessions ADD COLUMN subject TEXT").run();
+if (!studySessionColumnNames.includes('duration')) db.prepare("ALTER TABLE study_sessions ADD COLUMN duration INTEGER").run();
 
 const attendanceColumns = db.prepare("PRAGMA table_info(attendance)").all() as any[];
 const attendanceColumnNames = attendanceColumns.map(c => c.name);
@@ -323,50 +377,6 @@ if (!columnNames.includes('program')) db.prepare("ALTER TABLE assignments ADD CO
 if (!columnNames.includes('year')) db.prepare("ALTER TABLE assignments ADD COLUMN year TEXT").run();
 if (!columnNames.includes('group_name')) db.prepare("ALTER TABLE assignments ADD COLUMN group_name TEXT").run();
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS study_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    teacher_id INTEGER,
-    status TEXT CHECK(status IN ('ACTIVE', 'COMPLETED')) DEFAULT 'ACTIVE',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(teacher_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS session_presence (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id INTEGER,
-    user_id INTEGER,
-    is_verified BOOLEAN DEFAULT 0,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(session_id) REFERENCES study_sessions(id),
-    FOREIGN KEY(user_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS schedules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    teacher_id INTEGER,
-    day_of_week TEXT NOT NULL,
-    start_time TEXT NOT NULL,
-    end_time TEXT NOT NULL,
-    program TEXT NOT NULL,
-    year TEXT NOT NULL,
-    group_name TEXT,
-    building TEXT NOT NULL,
-    classroom TEXT NOT NULL,
-    FOREIGN KEY(teacher_id) REFERENCES users(id)
-  );
-
-  CREATE TABLE IF NOT EXISTS performance_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    type TEXT CHECK(type IN ('TEST', 'ASSIGNMENT', 'ATTENDANCE')),
-    score REAL,
-    max_score REAL,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-  );
-`);
-
 // Seed Data
 const seed = () => {
   const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as any;
@@ -417,13 +427,10 @@ const seed = () => {
 seed();
 
 async function startServer() {
+  console.log("Starting server initialization...");
   const app = express();
   
   app.use((req, res, next) => {
-    const log = `${new Date().toISOString()} - ${req.method} ${req.url}\n`;
-    try {
-      fs.appendFileSync("request_logs.txt", log);
-    } catch (e) {}
     console.log(`[EARLY] ${req.method} ${req.url}`);
     next();
   });
@@ -872,6 +879,15 @@ async function startServer() {
     }
   });
 
+  app.get("/api/classes", authenticate, (req: any, res) => {
+    try {
+      const classes = db.prepare("SELECT * FROM classes").all();
+      res.json(classes);
+    } catch (err) {
+      res.status(500).json({ error: "Gabim gjatë marrjes së klasave" });
+    }
+  });
+
   app.get("/api/user/me", authenticate, (req: any, res) => {
     const user = db.prepare(`
       SELECT u.id, u.name, u.surname, u.email, u.role, u.class_code, u.program, u.year, u.group_name, u.study_type, u.phone, u.bio, u.profile_photo, u.is_confirmed, u.email_verified,
@@ -891,11 +907,59 @@ async function startServer() {
   });
 
   // Study Sessions
+  const activeTimeouts = new Map<number, NodeJS.Timeout>();
+
   app.post("/api/study/start", authenticate, (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
-    const info = db.prepare("INSERT INTO study_sessions (teacher_id) VALUES (?)").run(req.user.id);
-    io.emit("study_session_start", { sessionId: info.lastInsertRowid });
-    res.json({ sessionId: info.lastInsertRowid });
+    const { classId, subject, duration } = req.body;
+    
+    // Close any previous active sessions for this teacher
+    db.prepare("UPDATE study_sessions SET status = 'COMPLETED' WHERE teacher_id = ? AND status = 'ACTIVE'").run(req.user.id);
+    
+    const info = db.prepare("INSERT INTO study_sessions (teacher_id, class_id, subject, duration) VALUES (?, ?, ?, ?)").run(req.user.id, classId, subject, duration);
+    const sessionId = info.lastInsertRowid as number;
+    
+    io.emit("study_session_start", { sessionId, classId, subject, duration, teacherName: req.user.name });
+    
+    // Set timeouts for notifications and auto-close
+    if (duration > 5) {
+      const warningTime = (duration - 5) * 60 * 1000;
+      const warningTimeout = setTimeout(() => {
+        io.emit("study_session_warning", { sessionId, message: "Ora po përfundon në 5 minuta" });
+      }, warningTime);
+      activeTimeouts.set(sessionId * 10 + 1, warningTimeout);
+    }
+    
+    const closeTimeout = setTimeout(() => {
+      db.prepare("UPDATE study_sessions SET status = 'COMPLETED' WHERE id = ?").run(sessionId);
+      io.emit("study_session_end", { sessionId, auto: true });
+    }, duration * 60 * 1000);
+    activeTimeouts.set(sessionId * 10 + 2, closeTimeout);
+
+    res.json({ sessionId });
+  });
+
+  app.post("/api/study/end", authenticate, (req: any, res) => {
+    if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    const { sessionId } = req.body;
+    
+    db.prepare("UPDATE study_sessions SET status = 'COMPLETED' WHERE id = ?").run(sessionId);
+    
+    // Clear timeouts
+    const t1 = activeTimeouts.get(sessionId * 10 + 1);
+    const t2 = activeTimeouts.get(sessionId * 10 + 2);
+    if (t1) clearTimeout(t1);
+    if (t2) clearTimeout(t2);
+    activeTimeouts.delete(sessionId * 10 + 1);
+    activeTimeouts.delete(sessionId * 10 + 2);
+    
+    io.emit("study_session_end", { sessionId, auto: false });
+    res.json({ success: true });
+  });
+
+  app.post("/api/user/mark-verified-shown", authenticate, (req: any, res) => {
+    db.prepare("UPDATE users SET email_verified_shown = 1 WHERE id = ?").run(req.user.id);
+    res.json({ success: true });
   });
 
   app.post("/api/study/confirm", authenticate, (req: any, res) => {
@@ -918,7 +982,21 @@ async function startServer() {
   });
 
   app.get("/api/study/active", authenticate, (req: any, res) => {
-    const session = db.prepare("SELECT * FROM study_sessions WHERE status = 'ACTIVE' ORDER BY created_at DESC LIMIT 1").get();
+    let session;
+    if (req.user.role === 'TEACHER') {
+      session = db.prepare("SELECT * FROM study_sessions WHERE status = 'ACTIVE' AND teacher_id = ? ORDER BY created_at DESC LIMIT 1").get(req.user.id);
+    } else {
+      // Find active session for the student's class
+      session = db.prepare(`
+        SELECT ss.*, u.name as teacherName 
+        FROM study_sessions ss
+        JOIN users u ON ss.teacher_id = u.id
+        JOIN class_members cm ON ss.class_id = cm.class_id
+        WHERE ss.status = 'ACTIVE' AND cm.user_id = ? AND cm.status = 'CONFIRMED'
+        ORDER BY ss.created_at DESC LIMIT 1
+      `).get(req.user.id);
+    }
+    
     if (!session) return res.json(null);
     
     const presence = db.prepare(`
@@ -1462,6 +1540,24 @@ async function startServer() {
   app.post("/api/schedules", authenticate, (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
     const { day_of_week, start_time, end_time, program, year, group_name, building, classroom } = req.body;
+    
+    // Check for conflicts
+    const conflict = db.prepare(`
+      SELECT * FROM schedules 
+      WHERE day_of_week = ? 
+      AND (
+        (program = ? AND year = ? AND group_name = ?) -- Class conflict
+        OR teacher_id = ? -- Teacher conflict
+      )
+      AND (
+        (start_time < ? AND end_time > ?) -- Overlaps
+      )
+    `).get(day_of_week, program, year, group_name, req.user.id, end_time, start_time);
+
+    if (conflict) {
+      return res.status(400).json({ error: "Konflikt orari! Kjo klasë ose mësues ka një orë tjetër në këtë kohë." });
+    }
+
     const info = db.prepare(`
       INSERT INTO schedules (teacher_id, day_of_week, start_time, end_time, program, year, group_name, building, classroom) 
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1548,11 +1644,13 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    console.log("Initializing Vite middleware...");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
+    console.log("Vite middleware initialized.");
   } else {
     app.use(express.static(path.join(__dirname, "dist")));
     app.get("*", (req, res) => {

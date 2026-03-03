@@ -114,45 +114,88 @@ const Sidebar = ({ role }: { role: Role }) => {
 };
 
 const Header = () => {
-  const { user, logout } = useAuth();
-  const logoUrl = "https://i.ibb.co/LdsTzhWj/IMG-3202.png";
+  const { user, logout, token, refreshUser } = useAuth();
+  const [showVerifiedMessage, setShowVerifiedMessage] = useState(false);
+
+  useEffect(() => {
+    if (user && user.email_verified && !user.email_verified_shown) {
+      setShowVerifiedMessage(true);
+      // Mark as shown in backend
+      fetch('/api/user/mark-verified-shown', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      }).then(() => refreshUser());
+    }
+  }, [user, token]);
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 fixed top-0 right-0 left-0 md:left-64 z-10 flex items-center justify-between px-4 md:px-8">
-      <div className="flex items-center space-x-4">
-        <h2 className="text-sm md:text-lg font-semibold text-slate-800">Mirëseerdhe, {user?.name}</h2>
-      </div>
-      <div className="flex items-center space-x-2 md:space-x-4">
-        <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-full relative hidden sm:block">
-          <Bell size={20} />
-          <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-        </button>
-        
-        <div className="flex items-center space-x-3 border-l border-slate-100 pl-4">
-          <Link to="/profile" className="flex items-center space-x-3 group">
-            <div className="text-right hidden sm:block">
-              <p className="text-sm font-bold text-slate-900 group-hover:text-blue-600 transition-colors">{user?.name} {user?.surname}</p>
-              <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">{user?.role}</p>
-            </div>
-            <div className="relative">
-              <MotionLogo size="md" />
-              {user?.email_verified && (
-                <div className="absolute -bottom-1 -right-1 bg-green-500 text-white rounded-full p-0.5 border-2 border-white">
-                  <CheckCircle size={10} fill="currentColor" />
-                </div>
-              )}
-            </div>
-          </Link>
-          <button 
-            onClick={logout}
-            className="flex items-center space-x-1 md:space-x-2 px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors text-xs md:text-sm font-medium"
+    <>
+      <AnimatePresence>
+        {showVerifiedMessage && (
+          <motion.div 
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-green-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3"
           >
-            <LogOut size={16} />
-            <span>Dil</span>
-          </button>
+            <CheckCircle size={20} />
+            <span className="font-bold">Faleminderit për verifikimin e emailit!</span>
+            <button onClick={() => setShowVerifiedMessage(false)} className="ml-4 hover:opacity-70">
+              <X size={18} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <header className="h-16 bg-white border-b border-slate-200 fixed top-0 right-0 left-0 md:left-64 z-10 flex items-center justify-between px-4 md:px-8">
+        <div className="flex items-center space-x-4">
+          <h2 className="text-sm md:text-lg font-semibold text-slate-800">Mirëseerdhe, {user?.name}</h2>
         </div>
-      </div>
-    </header>
+        <div className="flex items-center space-x-2 md:space-x-4">
+          <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-full relative hidden sm:block">
+            <Bell size={20} />
+            <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+          </button>
+          
+          <div className="flex items-center space-x-3 border-l border-slate-100 pl-4">
+            <Link to="/profile" className="flex items-center space-x-3 group">
+              <div className="text-right hidden sm:block">
+                <p className="text-sm font-bold text-slate-900 group-hover:text-blue-600 transition-colors flex items-center justify-end space-x-1">
+                  <span>{user?.name} {user?.surname}</span>
+                  {user?.email_verified && (
+                    <span className="text-blue-500" title={user.role === 'STUDENT' ? 'Verified Student' : 'Verified Teacher'}>
+                      <CheckCircle size={14} fill="currentColor" className="text-white" />
+                    </span>
+                  )}
+                  {user?.role === 'STUDENT' && (user as any).class_status === 'CONFIRMED' && (
+                    <span className="text-green-500" title="I Verifikuar në Klasë">
+                      <CheckCircle size={14} fill="currentColor" className="text-white" />
+                    </span>
+                  )}
+                </p>
+                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">
+                  {user?.role === 'STUDENT' ? `Student | Klasa ${user.program}` : 'Mësues'}
+                </p>
+              </div>
+              <div className="relative">
+                <MotionLogo size="md" />
+                {user?.email_verified && (
+                  <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white rounded-full p-0.5 border-2 border-white">
+                    <CheckCircle size={10} />
+                  </div>
+                )}
+              </div>
+            </Link>
+            <button 
+              onClick={logout}
+              className="flex items-center space-x-1 md:space-x-2 px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors text-xs md:text-sm font-medium"
+            >
+              <LogOut size={16} />
+              <span>Dil</span>
+            </button>
+          </div>
+        </div>
+      </header>
+    </>
   );
 };
 
@@ -236,7 +279,7 @@ const LoginPage = () => {
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
         <iframe 
-          src="https://streamable.com/e/0n9o2f?autoplay=1&muted=1&loop=1&controls=0" 
+          src="https://streamable.com/e/jsx1ll?autoplay=1&muted=1&loop=1&controls=0" 
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[177.77vh] h-[56.25vw] min-w-full min-h-full border-none"
           allow="autoplay; fullscreen"
         ></iframe>
@@ -245,40 +288,40 @@ const LoginPage = () => {
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md w-full bg-white/60 rounded-2xl shadow-2xl p-8 relative z-10 border border-white/20 backdrop-blur-md"
+        className="max-w-md w-full bg-transparent rounded-2xl p-8 relative z-10 border border-white/10 backdrop-blur-[2px]"
       >
-        <h1 className="text-2xl font-bold text-center text-slate-900 mb-2 uppercase tracking-tight">DIGITAL STUDENT FSHN</h1>
-        <p className="text-center text-slate-600 font-medium mb-8">Platforma Studentore</p>
+        <h1 className="text-2xl font-bold text-center text-white mb-2 uppercase tracking-tight">DIGITAL STUDENT FSHN</h1>
+        <p className="text-center text-slate-300 font-medium mb-8">Platforma Studentore</p>
         
-        {error && <div className="bg-red-50/80 text-red-600 p-3 rounded-lg mb-6 text-sm border border-red-100 backdrop-blur-sm">{error}</div>}
+        {error && <div className="bg-red-500/20 text-red-200 p-3 rounded-lg mb-6 text-sm border border-red-500/30 backdrop-blur-sm">{error}</div>}
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+            <label className="block text-sm font-medium text-slate-200 mb-1">Email</label>
             <input 
               type="email" 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+              className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white placeholder:text-slate-500"
               placeholder="emri@fshn.edu.al"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Fjalëkalimi</label>
+            <label className="block text-sm font-medium text-slate-200 mb-1">Fjalëkalimi</label>
             <div className="relative">
               <input 
                 type={showPassword ? "text" : "password"} 
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white placeholder:text-slate-500"
                 placeholder="••••••••"
                 required
               />
               <button 
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
               >
                 {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
@@ -286,37 +329,37 @@ const LoginPage = () => {
           </div>
           <button 
             disabled={loading}
-            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 shadow-lg shadow-blue-200"
+            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 shadow-lg shadow-blue-900/20"
           >
             {loading ? 'Duke hyrë...' : 'Hyr'}
           </button>
         </form>
 
         <div className="mt-4 text-center">
-          <Link to="/forgot-password" size="sm" className="text-blue-600 hover:underline text-sm font-medium">
+          <Link to="/forgot-password" size="sm" className="text-blue-400 hover:text-blue-300 text-sm font-medium">
             Keni harruar fjalëkalimin?
           </Link>
         </div>
 
         <div className="relative my-8">
           <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-slate-200"></div>
+            <div className="w-full border-t border-white/10"></div>
           </div>
           <div className="relative flex justify-center text-sm">
-            <span className="px-2 bg-white text-slate-500">Ose vazhdoni me</span>
+            <span className="px-2 bg-transparent text-slate-400">Ose vazhdoni me</span>
           </div>
         </div>
 
         <button 
           onClick={handleGoogleLogin}
-          className="w-full flex items-center justify-center space-x-3 p-3 border border-slate-200 rounded-lg font-medium hover:bg-slate-50 transition-colors"
+          className="w-full flex items-center justify-center space-x-3 p-3 border border-white/20 rounded-lg font-medium hover:bg-white/5 transition-colors text-white"
         >
           <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
           <span>Hyni me Google</span>
         </button>
 
-        <p className="mt-6 text-center text-sm text-slate-500">
-          Nuk keni llogari? <Link to="/register" className="text-blue-600 font-medium">Regjistrohuni</Link>
+        <p className="mt-6 text-center text-sm text-slate-400">
+          Nuk keni llogari? <Link to="/register" className="text-blue-400 font-medium hover:text-blue-300">Regjistrohuni</Link>
         </p>
       </motion.div>
     </div>
@@ -365,7 +408,7 @@ const ForgotPasswordPage = () => {
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
         <iframe 
-          src="https://streamable.com/e/0n9o2f?autoplay=1&muted=1&loop=1&controls=0" 
+          src="https://streamable.com/e/jsx1ll?autoplay=1&muted=1&loop=1&controls=0" 
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[177.77vh] h-[56.25vw] min-w-full min-h-full border-none"
           allow="autoplay; fullscreen"
         ></iframe>
@@ -374,35 +417,35 @@ const ForgotPasswordPage = () => {
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md w-full bg-white/60 rounded-2xl shadow-2xl p-8 relative z-10 border border-white/20"
+        className="max-w-md w-full bg-transparent rounded-2xl p-8 relative z-10 border border-white/10 backdrop-blur-[2px]"
       >
-        <h1 className="text-2xl font-bold text-center text-slate-900 mb-2">Harruat Fjalëkalimin?</h1>
-        <p className="text-center text-slate-500 mb-8">Shkruani email-in tuaj për të marrë linkun e rivendosjes</p>
+        <h1 className="text-2xl font-bold text-center text-white mb-2">Harruat Fjalëkalimin?</h1>
+        <p className="text-center text-slate-300 mb-8">Shkruani email-in tuaj për të marrë linkun e rivendosjes</p>
         
-        {message && <div className="bg-green-50/80 text-green-600 p-3 rounded-lg mb-6 text-sm border border-green-100 backdrop-blur-sm">{message}</div>}
-        {error && <div className="bg-red-50/80 text-red-600 p-3 rounded-lg mb-6 text-sm border border-red-100 backdrop-blur-sm">{error}</div>}
+        {message && <div className="bg-green-500/20 text-green-200 p-3 rounded-lg mb-6 text-sm border border-green-500/30 backdrop-blur-sm">{message}</div>}
+        {error && <div className="bg-red-500/20 text-red-200 p-3 rounded-lg mb-6 text-sm border border-red-500/30 backdrop-blur-sm">{error}</div>}
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+            <label className="block text-sm font-medium text-slate-200 mb-1">Email</label>
             <input 
               type="email" 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white placeholder:text-slate-500"
               placeholder="emri@fshn.edu.al"
               required
             />
           </div>
           <button 
             disabled={loading}
-            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 shadow-lg shadow-blue-900/20"
           >
             {loading ? 'Duke dërguar...' : 'Dërgo Linkun'}
           </button>
         </form>
-        <p className="mt-6 text-center text-sm text-slate-500">
-          U kujtuat? <Link to="/login" className="text-blue-600 font-medium">Kthehu te hyrja</Link>
+        <p className="mt-6 text-center text-sm text-slate-400">
+          U kujtuat? <Link to="/login" className="text-blue-400 font-medium hover:text-blue-300">Kthehu te hyrja</Link>
         </p>
       </motion.div>
     </div>
@@ -460,7 +503,7 @@ const ResetPasswordPage = () => {
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
         <iframe 
-          src="https://streamable.com/e/0n9o2f?autoplay=1&muted=1&loop=1&controls=0" 
+          src="https://streamable.com/e/jsx1ll?autoplay=1&muted=1&loop=1&controls=0" 
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[177.77vh] h-[56.25vw] min-w-full min-h-full border-none"
           allow="autoplay; fullscreen"
         ></iframe>
@@ -469,40 +512,40 @@ const ResetPasswordPage = () => {
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md w-full bg-white/60 rounded-2xl shadow-2xl p-8 relative z-10 border border-white/20"
+        className="max-w-md w-full bg-transparent rounded-2xl p-8 relative z-10 border border-white/10 backdrop-blur-[2px]"
       >
-        <h1 className="text-2xl font-bold text-center text-slate-900 mb-2">Rivendos Fjalëkalimin</h1>
-        <p className="text-center text-slate-500 mb-8">Shkruani fjalëkalimin tuaj të ri</p>
+        <h1 className="text-2xl font-bold text-center text-white mb-2">Rivendos Fjalëkalimin</h1>
+        <p className="text-center text-slate-300 mb-8">Shkruani fjalëkalimin tuaj të ri</p>
         
-        {message && <div className="bg-green-50/80 text-green-600 p-3 rounded-lg mb-6 text-sm border border-green-100 backdrop-blur-sm">{message} (Duke ju ridrejtuar...)</div>}
-        {error && <div className="bg-red-50/80 text-red-600 p-3 rounded-lg mb-6 text-sm border border-red-100 backdrop-blur-sm">{error}</div>}
+        {message && <div className="bg-green-500/20 text-green-200 p-3 rounded-lg mb-6 text-sm border border-green-500/30 backdrop-blur-sm">{message} (Duke ju ridrejtuar...)</div>}
+        {error && <div className="bg-red-500/20 text-red-200 p-3 rounded-lg mb-6 text-sm border border-red-500/30 backdrop-blur-sm">{error}</div>}
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Fjalëkalimi i Ri</label>
+            <label className="block text-sm font-medium text-slate-200 mb-1">Fjalëkalimi i Ri</label>
             <input 
               type="password" 
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white placeholder:text-slate-500"
               placeholder="••••••••"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Konfirmo Fjalëkalimin</label>
+            <label className="block text-sm font-medium text-slate-200 mb-1">Konfirmo Fjalëkalimin</label>
             <input 
               type="password" 
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white placeholder:text-slate-500"
               placeholder="••••••••"
               required
             />
           </div>
           <button 
             disabled={loading}
-            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 shadow-lg shadow-blue-900/20"
           >
             {loading ? 'Duke ruajtur...' : 'Ruaj Fjalëkalimin'}
           </button>
@@ -601,7 +644,7 @@ const RegisterPage = () => {
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
         <iframe 
-          src="https://streamable.com/e/0n9o2f?autoplay=1&muted=1&loop=1&controls=0" 
+          src="https://streamable.com/e/jsx1ll?autoplay=1&muted=1&loop=1&controls=0" 
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[177.77vh] h-[56.25vw] min-w-full min-h-full border-none"
           allow="autoplay; fullscreen"
         ></iframe>
@@ -610,139 +653,139 @@ const RegisterPage = () => {
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="max-w-md w-full bg-white/60 rounded-2xl shadow-2xl p-8 relative z-10 border border-white/20"
+        className="max-w-md w-full bg-transparent rounded-2xl p-8 relative z-10 border border-white/10 backdrop-blur-[2px]"
       >
-        <h1 className="text-2xl font-bold text-center text-slate-900 mb-2 uppercase tracking-tight">Regjistrimi</h1>
-        <p className="text-center text-slate-600 font-medium mb-8">DIGITAL STUDENT FSHN</p>
+        <h1 className="text-2xl font-bold text-center text-white mb-2 uppercase tracking-tight">Regjistrimi</h1>
+        <p className="text-center text-slate-300 font-medium mb-8">DIGITAL STUDENT FSHN</p>
         
         {location.state?.email && (
-          <div className="bg-blue-50/80 text-blue-700 p-3 rounded-lg mb-6 text-sm border border-blue-100 backdrop-blur-sm">
+          <div className="bg-blue-500/20 text-blue-200 p-3 rounded-lg mb-6 text-sm border border-blue-500/30 backdrop-blur-sm">
             Ju jeni lidhur me Google ({location.state.email}).
           </div>
         )}
         
-        {error && <div className="bg-red-50/80 text-red-600 p-3 rounded-lg mb-6 text-sm border border-red-100 backdrop-blur-sm">{error}</div>}
+        {error && <div className="bg-red-500/20 text-red-200 p-3 rounded-lg mb-6 text-sm border border-red-500/30 backdrop-blur-sm">{error}</div>}
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Emri</label>
+              <label className="block text-sm font-medium text-slate-200 mb-1">Emri</label>
               <input 
                 type="text" 
                 value={formData.name}
                 onChange={(e) => setFormData({...formData, name: e.target.value})}
-                className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white placeholder:text-slate-500"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Mbiemri</label>
+              <label className="block text-sm font-medium text-slate-200 mb-1">Mbiemri</label>
               <input 
                 type="text" 
                 value={formData.surname}
                 onChange={(e) => setFormData({...formData, surname: e.target.value})}
-                className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white placeholder:text-slate-500"
                 required
               />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+            <label className="block text-sm font-medium text-slate-200 mb-1">Email</label>
             <input 
               type="email" 
               value={formData.email}
               onChange={(e) => setFormData({...formData, email: e.target.value})}
-              className={`w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none ${location.state?.email ? 'bg-slate-50 cursor-not-allowed' : ''}`}
+              className={`w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white placeholder:text-slate-500 ${location.state?.email ? 'opacity-50 cursor-not-allowed' : ''}`}
               required
               readOnly={!!location.state?.email}
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Fjalëkalimi</label>
+            <label className="block text-sm font-medium text-slate-200 mb-1">Fjalëkalimi</label>
             <div className="relative">
               <input 
                 type={showPassword ? "text" : "password"} 
                 value={formData.password}
                 onChange={(e) => setFormData({...formData, password: e.target.value})}
-                className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white placeholder:text-slate-500"
                 placeholder="••••••••"
                 required
               />
               <button 
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
               >
                 {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Roli</label>
+            <label className="block text-sm font-medium text-slate-200 mb-1">Roli</label>
             <select 
               value={formData.role}
               onChange={(e) => setFormData({...formData, role: e.target.value as Role})}
-              className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white"
             >
-              <option value="STUDENT">Student</option>
-              <option value="TEACHER">Mësues</option>
+              <option value="STUDENT" className="bg-slate-900">Student</option>
+              <option value="TEACHER" className="bg-slate-900">Mësues</option>
             </select>
           </div>
           {formData.role === 'STUDENT' && (
             <>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Dega</label>
+                <label className="block text-sm font-medium text-slate-200 mb-1">Dega</label>
                 <select 
                   value={formData.program}
                   onChange={(e) => setFormData({...formData, program: e.target.value})}
-                  className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                  className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white"
                 >
-                  {programs.map(p => <option key={p} value={p}>{p}</option>)}
+                  {programs.map(p => <option key={p} value={p} className="bg-slate-900">{p}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Viti</label>
+                  <label className="block text-sm font-medium text-slate-200 mb-1">Viti</label>
                   <select 
                     value={formData.year}
                     onChange={(e) => setFormData({...formData, year: e.target.value})}
-                    className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                    className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white"
                   >
-                    {years.map(y => <option key={y} value={y}>{y}</option>)}
+                    {years.map(y => <option key={y} value={y} className="bg-slate-900">{y}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Grupi</label>
+                  <label className="block text-sm font-medium text-slate-200 mb-1">Grupi</label>
                   <select 
                     value={formData.group_name}
                     onChange={(e) => setFormData({...formData, group_name: e.target.value})}
-                    className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                    className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white"
                   >
-                    {["A", "B", "C"].map(g => <option key={g} value={g}>{g}</option>)}
+                    {["A", "B", "C"].map(g => <option key={g} value={g} className="bg-slate-900">{g}</option>)}
                   </select>
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Lloji i Studimit</label>
+                <label className="block text-sm font-medium text-slate-200 mb-1">Lloji i Studimit</label>
                 <select 
                   value={formData.study_type}
                   onChange={(e) => setFormData({...formData, study_type: e.target.value})}
-                  className="w-full p-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none bg-white/80"
+                  className="w-full p-3 rounded-lg border border-white/20 focus:ring-2 focus:ring-blue-500 outline-none bg-white/5 text-white"
                 >
-                  <option value="BACHELOR">Bachelor</option>
-                  <option value="MASTER">Master</option>
+                  <option value="BACHELOR" className="bg-slate-900">Bachelor</option>
+                  <option value="MASTER" className="bg-slate-900">Master</option>
                 </select>
               </div>
               {!hasAdmin && (
-                <div className="flex items-center space-x-2 p-3 bg-blue-50/50 rounded-lg border border-blue-100">
+                <div className="flex items-center space-x-2 p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
                   <input 
                     type="checkbox" 
                     id="is_president"
                     checked={formData.is_president}
                     onChange={(e) => setFormData({...formData, is_president: e.target.checked})}
-                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-slate-300 rounded"
+                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-white/20 rounded bg-white/5"
                   />
-                  <label htmlFor="is_president" className="text-sm font-bold text-blue-700 cursor-pointer">
+                  <label htmlFor="is_president" className="text-sm font-bold text-blue-400 cursor-pointer">
                     President i Klasës (Admin)
                   </label>
                 </div>
@@ -751,13 +794,13 @@ const RegisterPage = () => {
           )}
           <button 
             type="submit"
-            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200"
+            className="w-full bg-blue-600 text-white p-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg shadow-blue-900/20"
           >
             Regjistrohu
           </button>
         </form>
-        <p className="mt-6 text-center text-sm text-slate-600">
-          Keni llogari? <Link to="/login" className="text-blue-600 font-bold hover:underline">Hyni këtu</Link>
+        <p className="mt-6 text-center text-sm text-slate-400">
+          Keni llogari? <Link to="/login" className="text-blue-400 font-bold hover:text-blue-300">Hyni këtu</Link>
         </p>
       </motion.div>
     </div>
@@ -802,149 +845,191 @@ const ProfilePage = () => {
   };
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-4xl mx-auto space-y-8 pb-20">
       <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-8">
-        <div className="flex items-center space-x-6 mb-8">
+        <div className="flex flex-col md:flex-row items-center space-y-6 md:space-y-0 md:space-x-8 mb-12">
           <div className="relative">
             <MotionLogo size="xl" />
             {user?.email_verified && (
-              <div className="absolute -bottom-2 -right-2 bg-green-500 text-white rounded-full p-1.5 border-4 border-white shadow-lg">
-                <CheckCircle size={20} fill="currentColor" />
+              <div className="absolute bottom-2 right-2 bg-blue-500 text-white p-2 rounded-full border-4 border-white shadow-lg">
+                <Award size={24} />
               </div>
             )}
           </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h2 className="text-2xl font-bold text-slate-900">Profili im</h2>
-              {user?.email_verified && (
-                <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center">
-                  <CheckCircle size={10} className="mr-1" /> Verifikuar
-                </span>
-              )}
+          <div className="flex-1 text-center md:text-left">
+            <div className="flex items-center justify-center md:justify-start space-x-3 mb-2">
+              <h2 className="text-3xl font-bold text-slate-900">{user?.name} {user?.surname}</h2>
+              <div className="flex flex-wrap gap-2">
+                {user?.email_verified && (
+                  <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold flex items-center space-x-1">
+                    <CheckCircle size={12} />
+                    <span>{user.role === 'STUDENT' ? 'Verified Student' : 'Verified Teacher'}</span>
+                  </span>
+                )}
+                {user?.role === 'STUDENT' && (user as any).class_status === 'CONFIRMED' && (
+                  <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold flex items-center space-x-1">
+                    <CheckCircle size={12} />
+                    <span>I Verifikuar në Klasë</span>
+                  </span>
+                )}
+              </div>
             </div>
-            <p className="text-slate-500">Menaxhoni të dhënat tuaja personale</p>
-          </div>
-        </div>
-        
-        {message && <div className="bg-green-50 text-green-600 p-4 rounded-xl mb-6 text-sm font-medium border border-green-100">{message}</div>}
-        
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Emri</label>
-              <input 
-                type="text" 
-                value={formData.name}
-                onChange={(e) => setFormData({...formData, name: e.target.value})}
-                className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Mbiemri</label>
-              <input 
-                type="text" 
-                value={formData.surname}
-                onChange={(e) => setFormData({...formData, surname: e.target.value})}
-                className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-              />
-            </div>
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Email (Nuk mund të ndryshohet)</label>
-            <div className="flex space-x-2">
-              <input 
-                type="email" 
-                value={user?.email}
-                disabled
-                className="flex-1 p-3 rounded-xl border border-slate-100 bg-slate-50 text-slate-400 outline-none cursor-not-allowed"
-              />
-              {!user?.email_verified && (
-                <button
-                  type="button"
+            <p className="text-slate-500 mb-6">{user?.email}</p>
+            
+            {!user?.email_verified && (
+              <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-center justify-between">
+                <div className="flex items-center space-x-3 text-amber-700">
+                  <Clock size={20} />
+                  <span className="text-sm font-medium">Ju tashmë jeni regjistruar – Verifiko emailin</span>
+                </div>
+                <button 
                   onClick={async () => {
                     setLoading(true);
                     try {
-                      const res = await fetch('/api/user/verify-email', {
+                      const res = await fetch('/api/auth/verify-email', {
                         method: 'POST',
                         headers: { 'Authorization': `Bearer ${token}` }
                       });
                       if (res.ok) {
-                        await refreshUser();
-                        setMessage('Emaili u verifikua me sukses!');
-                        setTimeout(() => setMessage(''), 3000);
+                        setMessage('Email-i u verifikua me sukses!');
+                        refreshUser();
                       }
-                    } catch (e) {
-                      console.error(e);
-                    } finally {
-                      setLoading(false);
-                    }
+                    } catch (e) { console.error(e); }
+                    setLoading(false);
                   }}
-                  className="px-4 py-2 bg-green-600 text-white rounded-xl font-bold text-xs hover:bg-green-700 transition-all"
+                  disabled={loading}
+                  className="bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-700 transition-colors disabled:opacity-50"
                 >
-                  Verifiko
+                  {loading ? 'Duke verifikuar...' : 'Verifiko Tani'}
                 </button>
-              )}
-            </div>
+              </div>
+            )}
+            
+            {message && <div className="mt-4 p-3 bg-green-50 text-green-700 rounded-xl text-sm font-medium border border-green-100">{message}</div>}
           </div>
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Telefon</label>
-            <input 
-              type="text" 
-              value={formData.phone}
-              onChange={(e) => setFormData({...formData, phone: e.target.value})}
-              className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-              placeholder="+355..."
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Bio</label>
-            <textarea 
-              value={formData.bio}
-              onChange={(e) => setFormData({...formData, bio: e.target.value})}
-              className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none h-32"
-              placeholder="Tregoni diçka për veten..."
-            />
-          </div>
-
-          {user?.role === 'STUDENT' && (
+        <div className="border-t border-slate-100 pt-8">
+          <h3 className="text-xl font-bold text-slate-900 mb-6">Përditëso Profilin</h3>
+        
+          <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Grupi</label>
-                <select 
-                  value={formData.group_name}
-                  onChange={(e) => setFormData({...formData, group_name: e.target.value})}
+                <label className="block text-sm font-medium text-slate-700 mb-2">Emri</label>
+                <input 
+                  type="text" 
+                  value={formData.name}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
                   className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="A">Grupi A</option>
-                  <option value="B">Grupi B</option>
-                  <option value="C">Grupi C</option>
-                </select>
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Lloji i Studimit</label>
-                <select 
-                  value={formData.study_type}
-                  onChange={(e) => setFormData({...formData, study_type: e.target.value})}
+                <label className="block text-sm font-medium text-slate-700 mb-2">Mbiemri</label>
+                <input 
+                  type="text" 
+                  value={formData.surname}
+                  onChange={(e) => setFormData({...formData, surname: e.target.value})}
                   className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="BACHELOR">Bachelor</option>
-                  <option value="MASTER">Master</option>
-                </select>
+                />
               </div>
             </div>
-          )}
+            
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Email (Nuk mund të ndryshohet)</label>
+              <div className="flex space-x-2">
+                <input 
+                  type="email" 
+                  value={user?.email}
+                  disabled
+                  className="flex-1 p-3 rounded-xl border border-slate-100 bg-slate-50 text-slate-400 outline-none cursor-not-allowed"
+                />
+                {!user?.email_verified && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setLoading(true);
+                      try {
+                        const res = await fetch('/api/user/verify-email', {
+                          method: 'POST',
+                          headers: { 'Authorization': `Bearer ${token}` }
+                        });
+                        if (res.ok) {
+                          await refreshUser();
+                          setMessage('Emaili u verifikua me sukses!');
+                          setTimeout(() => setMessage(''), 3000);
+                        }
+                      } catch (e) {
+                        console.error(e);
+                      } finally {
+                        setLoading(false);
+                      }
+                    }}
+                    className="px-4 py-2 bg-green-600 text-white rounded-xl font-bold text-xs hover:bg-green-700 transition-all"
+                  >
+                    Verifiko
+                  </button>
+                )}
+              </div>
+            </div>
 
-          <button 
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white p-4 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 disabled:opacity-50"
-          >
-            {loading ? 'Duke ruajtur...' : 'Ruaj Ndryshimet'}
-          </button>
-        </form>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Telefon</label>
+              <input 
+                type="text" 
+                value={formData.phone}
+                onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                placeholder="+355..."
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Bio</label>
+              <textarea 
+                value={formData.bio}
+                onChange={(e) => setFormData({...formData, bio: e.target.value})}
+                className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none h-32"
+                placeholder="Tregoni diçka për veten..."
+              />
+            </div>
+
+            {user?.role === 'STUDENT' && (
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Grupi</label>
+                  <select 
+                    value={formData.group_name}
+                    onChange={(e) => setFormData({...formData, group_name: e.target.value})}
+                    className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="A">Grupi A</option>
+                    <option value="B">Grupi B</option>
+                    <option value="C">Grupi C</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Lloji i Studimit</label>
+                  <select 
+                    value={formData.study_type}
+                    onChange={(e) => setFormData({...formData, study_type: e.target.value})}
+                    className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="BACHELOR">Bachelor</option>
+                    <option value="MASTER">Master</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <button 
+              type="submit"
+              disabled={loading}
+              className="w-full bg-blue-600 text-white p-4 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 disabled:opacity-50"
+            >
+              {loading ? 'Duke ruajtur...' : 'Ruaj Ndryshimet'}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
@@ -1391,7 +1476,28 @@ const Dashboard = () => {
 };
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
+  const navigate = useNavigate();
+  
+  useEffect(() => {
+    const s = io();
+    s.on('study_session_start', async (data: any) => {
+      // Check if student belongs to this class
+      if (user?.role === 'STUDENT' && data.classId) {
+        try {
+          const res = await fetch('/api/classes/my', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const myClasses = await res.json();
+          if (myClasses.some((c: any) => c.id === data.classId)) {
+            navigate('/attendance');
+          }
+        } catch (e) { console.error(e); }
+      }
+    });
+    return () => { s.disconnect(); };
+  }, [user, navigate, token]);
+
   if (!user) return <Navigate to="/login" />;
 
   // Approval logic
