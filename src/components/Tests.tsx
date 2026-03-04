@@ -151,7 +151,8 @@ export default function Tests({ user, token }: { user: any, token: string }) {
   const handleAddQuestion = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!selectedTest) return;
-    const formData = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const formData = new FormData(form);
     const qData = {
       content: formData.get('content'),
       type: formData.get('type'),
@@ -167,7 +168,7 @@ export default function Tests({ user, token }: { user: any, token: string }) {
     });
     if (res.ok) {
       fetchQuestions(selectedTest.id);
-      e.currentTarget.reset();
+      form.reset();
     }
   };
 

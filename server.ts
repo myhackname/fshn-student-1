@@ -11,13 +11,28 @@ import multer from "multer";
 import fs from "fs";
 
 import nodemailer from "nodemailer";
+import admin from "firebase-admin";
 
 console.log("Server.ts is starting...");
+
+// Firebase Admin Initialization
+if (process.env.FIREBASE_PRIVATE_KEY) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    }),
+    storageBucket: `${process.env.FIREBASE_PROJECT_ID}.appspot.com`
+  });
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("platform.db");
+const dbPath = process.env.VERCEL ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
+const db = new Database(dbPath);
+const firestore = admin.apps.length > 0 ? admin.firestore() : null;
 const JWT_SECRET = process.env.JWT_SECRET || "fshn-secret-key-2026";
 
 // Initialize Database
@@ -440,7 +455,7 @@ async function startServer() {
   const httpServer = createServer(app);
 
   // Ensure uploads directory exists
-  const uploadDir = path.join(__dirname, "uploads");
+  const uploadDir = process.env.VERCEL ? path.join("/tmp", "uploads") : path.join(__dirname, "uploads");
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir);
   }
@@ -494,6 +509,104 @@ async function startServer() {
     
     const hashedPassword = await bcrypt.hash(password, 10);
     const logoUrl = "https://i.ibb.co/LdsTzhWj/IMG-3202.png";
+
+    if (firestore) {
+      try {
+        const usersRef = firestore.collection('users');
+        const userSnap = await usersRef.where('email', '==', email).get();
+        if (!userSnap.empty) return res.status(400).json({ error: "Ky email është i regjistruar" });
+
+        const userDoc = usersRef.doc();
+        const userId = userDoc.id;
+        let isConfirmed = 0;
+
+        const batch = firestore.batch();
+        
+        if (role === 'STUDENT') {
+          const classesRef = firestore.collection('classes');
+          const classSnap = await classesRef
+            .where('department', '==', program)
+            .where('year', '==', year)
+            .where('group_name', '==', group_name)
+            .where('study_type', '==', study_type)
+            .get();
+
+          let classId;
+          if (classSnap.empty) {
+            const classDoc = classesRef.doc();
+            classId = classDoc.id;
+            const classCode = `CLASS-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+            batch.set(classDoc, {
+              id: classId,
+              name: `${program} - ${year}`,
+              code: classCode,
+              department: program,
+              year,
+              group_name,
+              study_type,
+              admin_id: is_president ? userId : null
+            });
+
+            if (is_president) {
+              isConfirmed = 1;
+              batch.set(firestore.collection('class_members').doc(), {
+                class_id: classId,
+                user_id: userId,
+                status: 'CONFIRMED',
+                is_admin: 1,
+                joined_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+            } else {
+              batch.set(firestore.collection('class_members').doc(), {
+                class_id: classId,
+                user_id: userId,
+                status: 'PENDING',
+                joined_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+            }
+          } else {
+            const classroom = classSnap.docs[0].data();
+            classId = classroom.id;
+            if (is_president && !classroom.admin_id) {
+              isConfirmed = 1;
+              batch.update(classesRef.doc(classId), { admin_id: userId });
+              batch.set(firestore.collection('class_members').doc(), {
+                class_id: classId,
+                user_id: userId,
+                status: 'CONFIRMED',
+                is_admin: 1,
+                joined_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+            } else {
+              batch.set(firestore.collection('class_members').doc(), {
+                class_id: classId,
+                user_id: userId,
+                status: 'PENDING',
+                joined_at: admin.firestore.FieldValue.serverTimestamp()
+              });
+            }
+          }
+        } else {
+          isConfirmed = 1;
+        }
+
+        batch.set(userDoc, {
+          id: userId,
+          name, surname, email, password: hashedPassword, role, program, year, group_name, study_type, phone,
+          is_confirmed: isConfirmed,
+          profile_photo: logoUrl,
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        await batch.commit();
+        res.json({ message: "Regjistrimi u krye me sukses" });
+      } catch (e: any) {
+        console.error("Firestore Register Error:", e);
+        res.status(500).json({ error: "Gabim gjatë regjistrimit në Firebase" });
+      }
+      return;
+    }
+
     try {
       db.transaction(() => {
         const info = db.prepare("INSERT INTO users (name, surname, email, password, role, program, year, group_name, study_type, phone, is_confirmed, profile_photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -548,9 +661,41 @@ async function startServer() {
   });
 
   app.post("/api/auth/login", async (req, res) => {
-    console.log(`[LOGIN] Request received for: ${req.body?.email}`);
+    const { email, password } = req.body;
+    console.log(`[LOGIN] Request received for: ${email}`);
+
+    if (firestore) {
+      try {
+        const userSnap = await firestore.collection('users').where('email', '==', email).get();
+        if (userSnap.empty) return res.status(401).json({ error: "Email ose fjalëkalim i gabuar" });
+        
+        const userDoc = userSnap.docs[0];
+        const user = userDoc.data();
+        
+        const valid = await bcrypt.compare(password, user.password);
+        if (!valid) return res.status(401).json({ error: "Email ose fjalëkalim i gabuar" });
+
+        // Get class status
+        const memberSnap = await firestore.collection('class_members').where('user_id', '==', user.id).get();
+        const member = memberSnap.empty ? null : memberSnap.docs[0].data();
+
+        const token = jwt.sign({ id: user.id, role: user.role, name: user.name }, JWT_SECRET);
+        res.json({ 
+          token, 
+          user: { 
+            ...user, 
+            class_status: member?.status, 
+            is_class_admin: member?.is_admin 
+          } 
+        });
+      } catch (e) {
+        console.error("Firestore Login Error:", e);
+        res.status(500).json({ error: "Gabim gjatë hyrjes në Firebase" });
+      }
+      return;
+    }
+
     try {
-      const { email, password } = req.body;
       console.log("Login attempt for:", email);
       const userDetails = db.prepare(`
         SELECT u.*, cm.status as class_status, cm.is_admin as is_class_admin
@@ -599,9 +744,40 @@ async function startServer() {
   });
 
   app.post("/api/auth/firebase", async (req, res) => {
+    const { email, name, uid } = req.body;
+
+    if (firestore) {
+      try {
+        const userSnap = await firestore.collection('users').where('email', '==', email).get();
+        if (userSnap.empty) {
+          return res.status(404).json({ 
+            error: "Llogaria nuk u gjet. Ju lutem regjistrohuni më parë duke zgjedhur degën dhe vitin tuaj.",
+            email: email,
+            name: name
+          });
+        }
+        
+        const user = userSnap.docs[0].data();
+        const memberSnap = await firestore.collection('class_members').where('user_id', '==', user.id).get();
+        const member = memberSnap.empty ? null : memberSnap.docs[0].data();
+
+        const token = jwt.sign({ id: user.id, role: user.role, name: user.name }, JWT_SECRET);
+        res.json({ 
+          token, 
+          user: { 
+            ...user, 
+            class_status: member?.status, 
+            is_class_admin: member?.is_admin 
+          } 
+        });
+      } catch (e) {
+        console.error("Firestore Firebase Auth Error:", e);
+        res.status(500).json({ error: "Gabim gjatë hyrjes me Firebase" });
+      }
+      return;
+    }
+
     try {
-      const { email, name, uid } = req.body;
-      
       // Check if user exists
       const userDetails = db.prepare(`
         SELECT u.*, cm.status as class_status, cm.is_admin as is_class_admin
@@ -736,13 +912,23 @@ async function startServer() {
     if (adminClasses.length === 0) return res.json([]);
 
     const classIds = adminClasses.map(c => c.id);
-    const pending = db.prepare(`
-      SELECT cm.*, u.name, u.surname, u.email, c.name as class_name
-      FROM class_members cm
-      JOIN users u ON cm.user_id = u.id
-      JOIN classes c ON cm.class_id = c.id
-      WHERE cm.class_id IN (${classIds.map(() => '?').join(',')}) AND cm.status = 'PENDING'
-    `).all(...classIds);
+    
+    // Chunk classIds to avoid "Too many parameter values" error (limit is 999)
+    const chunkSize = 900;
+    let pending: any[] = [];
+    
+    for (let i = 0; i < classIds.length; i += chunkSize) {
+      const chunk = classIds.slice(i, i + chunkSize);
+      const chunkPending = db.prepare(`
+        SELECT cm.*, u.name, u.surname, u.email, c.name as class_name
+        FROM class_members cm
+        JOIN users u ON cm.user_id = u.id
+        JOIN classes c ON cm.class_id = c.id
+        WHERE cm.class_id IN (${chunk.map(() => '?').join(',')}) AND cm.status = 'PENDING'
+      `).all(...chunk);
+      pending = pending.concat(chunkPending);
+    }
+    
     res.json(pending);
   });
 
@@ -879,12 +1065,79 @@ async function startServer() {
     }
   });
 
-  app.get("/api/classes", authenticate, (req: any, res) => {
+  app.get("/api/classes", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const classSnap = await firestore.collection('classes').get();
+        return res.json(classSnap.docs.map(doc => doc.data()));
+      } catch (err) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     try {
       const classes = db.prepare("SELECT * FROM classes").all();
       res.json(classes);
     } catch (err) {
       res.status(500).json({ error: "Gabim gjatë marrjes së klasave" });
+    }
+  });
+
+  app.get("/api/class/members", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const userSnap = await firestore.collection('users').doc(req.user.id).get();
+        const user = userSnap.data();
+        if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+
+        const membersSnap = await firestore.collection('users')
+          .where('program', '==', user.program)
+          .where('year', '==', user.year)
+          .where('group_name', '==', user.group_name)
+          .where('study_type', '==', user.study_type)
+          .get();
+
+        const members = membersSnap.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: data.id,
+            name: data.name,
+            surname: data.surname,
+            role: data.role,
+            profile_photo: data.profile_photo
+          };
+        });
+
+        const onlineUserIds = new Set(Array.from(onlineUsers.values()).map((u: any) => u.id));
+        const membersWithStatus = members.map(m => ({
+          ...m,
+          isOnline: onlineUserIds.has(m.id)
+        }));
+
+        return res.json(membersWithStatus);
+      } catch (err) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+    try {
+      const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(req.user.id) as any;
+      if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+
+      const members = db.prepare(`
+        SELECT id, name, surname, role, profile_photo 
+        FROM users 
+        WHERE program = ? AND year = ? AND group_name = ? AND study_type = ?
+      `).all(user.program, user.year, user.group_name, user.study_type) as any[];
+
+      // Add online status
+      const onlineUserIds = new Set(Array.from(onlineUsers.values()).map((u: any) => u.id));
+      const membersWithStatus = members.map(m => ({
+        ...m,
+        isOnline: onlineUserIds.has(m.id)
+      }));
+
+      res.json(membersWithStatus);
+    } catch (err) {
+      res.status(500).json({ error: "Gabim gjatë marrjes së anëtarëve të klasës" });
     }
   });
 
@@ -1389,9 +1642,45 @@ async function startServer() {
   app.use("/uploads", express.static(uploadDir));
 
   // Chat
-  app.get("/api/chat/messages", authenticate, (req: any, res) => {
+  app.get("/api/chat/messages", authenticate, async (req: any, res) => {
     const { type } = req.query;
     
+    if (firestore) {
+      try {
+        let query: any = firestore.collection('messages')
+          .where('chat_type', '==', type || 'CLASS')
+          .orderBy('timestamp', 'desc')
+          .limit(100);
+
+        if (type === 'CLASS') {
+          const userSnap = await firestore.collection('users').doc(req.user.id).get();
+          const user = userSnap.data();
+          if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+
+          const classSnap = await firestore.collection('classes')
+            .where('department', '==', user.program)
+            .where('year', '==', user.year)
+            .where('group_name', '==', user.group_name)
+            .where('study_type', '==', user.study_type)
+            .get();
+
+          if (!classSnap.empty) {
+            query = query.where('class_id', '==', classSnap.docs[0].id);
+          }
+        }
+
+        const messagesSnap = await query.get();
+        const messages = messagesSnap.docs.map((doc: any) => ({
+          ...doc.data(),
+          timestamp: doc.data().timestamp?.toDate()?.toISOString()
+        }));
+        return res.json(messages.reverse());
+      } catch (e) {
+        console.error("Firestore Chat Error:", e);
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     let query = `
       SELECT m.*, u.name as senderName 
       FROM messages m 
@@ -1472,7 +1761,30 @@ async function startServer() {
   });
 
   // Digital Library
-  app.get("/api/library/books", authenticate, (req: any, res) => {
+  app.get("/api/library/books", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
+        const user = userSnap.data();
+        if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+
+        const classSnap = await firestore.collection('classes')
+          .where('department', '==', user.program)
+          .where('year', '==', user.year)
+          .where('group_name', '==', user.group_name)
+          .where('study_type', '==', user.study_type)
+          .get();
+
+        if (classSnap.empty) return res.json([]);
+        const classId = classSnap.docs[0].id;
+
+        const booksSnap = await firestore.collection('library_books').where('class_id', '==', classId).get();
+        return res.json(booksSnap.docs.map(doc => doc.data()));
+      } catch (e) {
+        console.error("Firestore Library Error:", e);
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(req.user.id) as any;
     if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
     const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
@@ -1520,7 +1832,28 @@ async function startServer() {
   });
 
   // Schedules
-  app.get("/api/schedules", authenticate, (req: any, res) => {
+  app.get("/api/schedules", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        if (req.user.role === 'TEACHER') {
+          const snap = await firestore.collection('schedules').where('teacher_id', '==', req.user.id).get();
+          return res.json(snap.docs.map(doc => doc.data()));
+        } else {
+          const userSnap = await firestore.collection('users').doc(req.user.id).get();
+          const user = userSnap.data();
+          if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+
+          const snap = await firestore.collection('schedules')
+            .where('program', '==', user.program)
+            .where('year', '==', user.year)
+            .where('group_name', '==', user.group_name)
+            .get();
+          return res.json(snap.docs.map(doc => doc.data()));
+        }
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     let schedules;
     if (req.user.role === 'TEACHER') {
       schedules = db.prepare("SELECT * FROM schedules WHERE teacher_id = ?").all(req.user.id);
@@ -1598,6 +1931,13 @@ async function startServer() {
 
   io.on("connection", (socket) => {
     socket.on("join", (userData) => {
+      // Ensure we have name and surname
+      const user = db.prepare("SELECT name, surname FROM users WHERE id = ?").get(userData.id) as any;
+      if (user) {
+        userData.name = user.name;
+        userData.surname = user.surname;
+      }
+      
       onlineUsers.set(socket.id, userData);
       
       if (userData.role === 'STUDENT') {
@@ -1615,14 +1955,64 @@ async function startServer() {
       io.emit("user_status", Array.from(onlineUsers.values()));
     });
 
-    socket.on("send_message", (msg) => {
+    socket.on("send_message", async (msg) => {
       let classId = null;
+      let senderName = "";
+
+      if (firestore) {
+        try {
+          const userSnap = await firestore.collection('users').doc(msg.senderId.toString()).get();
+          const user = userSnap.data();
+          if (user) {
+            senderName = `${user.name} ${user.surname}`;
+            if (msg.chatType === 'CLASS') {
+              const classSnap = await firestore.collection('classes')
+                .where('department', '==', user.program)
+                .where('year', '==', user.year)
+                .where('group_name', '==', user.group_name)
+                .where('study_type', '==', user.study_type)
+                .get();
+              if (!classSnap.empty) {
+                classId = classSnap.docs[0].id;
+              }
+            }
+          }
+          
+          const msgData = {
+            sender_id: msg.senderId,
+            senderName,
+            content: msg.content,
+            chat_type: msg.chatType || 'CLASS',
+            class_id: classId,
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+          };
+          
+          await firestore.collection('messages').add(msgData);
+          
+          const broadcastMsg = { ...msg, senderName, timestamp: new Date().toISOString() };
+          if (msg.chatType === 'CLASS' && classId) {
+            io.to(`class_${classId}`).emit("new_message", broadcastMsg);
+          } else {
+            io.emit("new_message", broadcastMsg);
+          }
+          return;
+        } catch (e) {
+          console.error("Firestore Socket Error:", e);
+        }
+      }
+
       if (msg.chatType === 'CLASS') {
-        const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(msg.senderId) as any;
+        const user = db.prepare("SELECT program, year, group_name, study_type, name, surname FROM users WHERE id = ?").get(msg.senderId) as any;
         if (user) {
           const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
             .get(user.program, user.year, user.group_name, user.study_type) as any;
           classId = classroom?.id;
+          msg.senderName = `${user.name} ${user.surname}`;
+        }
+      } else {
+        const user = db.prepare("SELECT name, surname FROM users WHERE id = ?").get(msg.senderId) as any;
+        if (user) {
+          msg.senderName = `${user.name} ${user.surname}`;
         }
       }
 

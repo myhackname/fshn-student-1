@@ -10,12 +10,14 @@ export default function Chat({ user, token }: { user: any, token: string }) {
   const [input, setInput] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
   const [chatType, setChatType] = useState<'CLASS' | 'SCHOOL'>('CLASS');
+  const [classMembers, setClassMembers] = useState<any[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const BANNED_WORDS = ['budalla', 'idiot', 'pis', 'rrugaç', 'shëmtuar']; // Simplified list
 
   useEffect(() => {
     fetchMessages();
+    fetchClassMembers();
     const s = io();
     setSocket(s);
     s.emit('join', { id: user.id, name: user.name, role: user.role });
@@ -26,8 +28,28 @@ export default function Chat({ user, token }: { user: any, token: string }) {
       }
     });
 
+    s.on('user_status', (onlineUsers: any[]) => {
+      const onlineIds = new Set(onlineUsers.map(u => u.id));
+      setClassMembers(prev => prev.map(m => ({
+        ...m,
+        isOnline: onlineIds.has(m.id)
+      })));
+    });
+
     return () => { s.disconnect(); };
   }, [user, chatType]);
+
+  const fetchClassMembers = async () => {
+    try {
+      const res = await fetch('/api/class/members', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setClassMembers(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const fetchMessages = async () => {
     try {
@@ -59,7 +81,7 @@ export default function Chat({ user, token }: { user: any, token: string }) {
 
     const msg = {
       senderId: user.id,
-      senderName: user.name,
+      senderName: `${user.name} ${user.surname}`,
       content: filteredContent,
       chatType: chatType,
       timestamp: new Date().toISOString()
@@ -102,15 +124,31 @@ export default function Chat({ user, token }: { user: any, token: string }) {
             </button>
           </div>
           <div className="p-4">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 px-2">Bisedat Private</h4>
-            {[1, 2, 3].map((_, i) => (
-              <button key={i} className="w-full flex items-center space-x-3 p-3 rounded-xl hover:bg-slate-50 transition-colors">
-                <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-bold text-xs">
-                  M
+            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 px-2">Anëtarët e Klasës</h4>
+            <div className="space-y-1">
+              {classMembers.map((member) => (
+                <div key={member.id} className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center space-x-3">
+                    <div className="relative">
+                      <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 font-bold text-xs overflow-hidden">
+                        {member.profile_photo ? (
+                          <img src={member.profile_photo} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          member.name.charAt(0)
+                        )}
+                      </div>
+                      {member.isOnline && (
+                        <div className="absolute -right-0.5 -bottom-0.5 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">{member.name} {member.surname}</p>
+                      <p className="text-[10px] text-slate-400 uppercase tracking-wider">{member.role === 'TEACHER' ? 'Mësues' : 'Student'}</p>
+                    </div>
+                  </div>
                 </div>
-                <span className="text-sm text-slate-700">Mësuesi i Lëndës</span>
-              </button>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -135,23 +173,39 @@ export default function Chat({ user, token }: { user: any, token: string }) {
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {messages.map((msg, i) => (
             <div key={i} className={`flex items-end space-x-2 ${msg.senderId === user.id ? 'justify-end' : 'justify-start'}`}>
-              {msg.senderId !== user.id && <MotionLogo size="sm" />}
+              {msg.senderId !== user.id && (
+                <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-500 font-bold text-xs overflow-hidden">
+                  {msg.senderPhoto ? (
+                    <img src={msg.senderPhoto} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    msg.senderName?.charAt(0) || 'U'
+                  )}
+                </div>
+              )}
               <div className={`max-w-[70%] ${msg.senderId === user.id ? 'order-1' : 'order-2'}`}>
                 <div className={`p-4 rounded-2xl shadow-sm ${
                   msg.senderId === user.id 
                     ? 'bg-blue-600 text-white rounded-tr-none' 
                     : 'bg-white text-slate-800 rounded-tl-none border border-slate-100'
                 }`}>
-                  {msg.senderId !== user.id && (
-                    <p className="text-[10px] font-bold uppercase tracking-wider opacity-60 mb-1">{msg.senderName}</p>
-                  )}
+                  <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${msg.senderId === user.id ? 'text-blue-100' : 'text-slate-400'}`}>
+                    {msg.senderName}
+                  </p>
                   <p className="text-sm leading-relaxed">{msg.content}</p>
                 </div>
                 <p className={`text-[10px] text-slate-400 mt-1 ${msg.senderId === user.id ? 'text-right' : 'text-left'}`}>
                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
-              {msg.senderId === user.id && <MotionLogo size="sm" />}
+              {msg.senderId === user.id && (
+                <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-xs overflow-hidden">
+                  {user.profile_photo ? (
+                    <img src={user.profile_photo} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    user.name?.charAt(0) || 'U'
+                  )}
+                </div>
+              )}
             </div>
           ))}
           <div ref={scrollRef} />

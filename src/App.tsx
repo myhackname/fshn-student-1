@@ -43,6 +43,7 @@ import LiveQuestions from './components/LiveQuestions';
 import ScreenShare from './components/ScreenShare';
 import Calendar from './components/Calendar';
 import Library from './components/Library';
+import Classroom from './components/Classroom';
 
 import { auth, googleProvider } from './firebase';
 import { signInWithPopup } from 'firebase/auth';
@@ -71,7 +72,8 @@ const Sidebar = ({ role }: { role: Role }) => {
   const { logout } = useAuth();
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-    { icon: Users, label: 'Pjesëmarrja', path: '/attendance' },
+    { icon: Users, label: 'Klasa', path: '/classroom' },
+    { icon: CheckCircle, label: 'Pjesëmarrja', path: '/attendance' },
     { icon: CalendarIcon, label: 'Kalendari', path: '/calendar' },
     { icon: BookOpen, label: 'Libraria', path: '/library' },
     { icon: FileText, label: 'Teste', path: '/tests' },
@@ -1509,7 +1511,8 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   const menuItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-    { icon: Users, label: 'Pjesëmarrja', path: '/attendance' },
+    { icon: Users, label: 'Klasa', path: '/classroom' },
+    { icon: CheckCircle, label: 'Pjesëmarrja', path: '/attendance' },
     { icon: CalendarIcon, label: 'Kalendari', path: '/calendar' },
     { icon: BookOpen, label: 'Libraria', path: '/library' },
     { icon: FileText, label: 'Teste', path: '/tests' },
@@ -1609,6 +1612,7 @@ export default function App() {
           <Route path="/live-questions" element={<Layout><LiveQuestions user={user} token={token || ''} /></Layout>} />
           <Route path="/screen-share" element={<Layout><ScreenShare user={user} token={token || ''} /></Layout>} />
           <Route path="/chat" element={<Layout><Chat user={user} token={token || ''} /></Layout>} />
+          <Route path="/classroom" element={<Layout><Classroom user={user} token={token || ''} /></Layout>} />
           <Route path="/library" element={<Layout><Library user={user} token={token || ''} /></Layout>} />
           <Route path="/analytics" element={<Layout><Analytics user={user} token={token || ''} /></Layout>} />
           <Route path="/profile" element={<Layout><ProfilePage /></Layout>} />
