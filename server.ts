@@ -2,7 +2,12 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
-import Database from "better-sqlite3";
+let Database: any;
+try {
+  Database = (await import("better-sqlite3")).default;
+} catch (e) {
+  console.error("Failed to import better-sqlite3:", e);
+}
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import path from "path";
@@ -30,8 +35,28 @@ if (process.env.FIREBASE_PRIVATE_KEY) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const dbPath = process.env.VERCEL ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
-const db = new Database(dbPath);
+let db: any;
+try {
+  const dbPath = process.env.VERCEL ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
+  if (Database) {
+    db = new Database(dbPath);
+    console.log("SQLite initialized at:", dbPath);
+  } else {
+    throw new Error("Database constructor is missing");
+  }
+} catch (e) {
+  console.error("Failed to initialize SQLite (likely due to native binary issues on Vercel):", e);
+  // Mock DB to prevent crashes if Firestore is available as primary
+  db = {
+    prepare: () => ({
+      run: () => ({ lastInsertRowid: 0, changes: 0 }),
+      get: () => ({ count: 0 }), // Return an object with count to prevent seeding crashes
+      all: () => []
+    }),
+    exec: () => {},
+    transaction: (cb: any) => cb()
+  };
+}
 const firestore = admin.apps.length > 0 ? admin.firestore() : null;
 const JWT_SECRET = process.env.JWT_SECRET || "fshn-secret-key-2026";
 
@@ -439,7 +464,11 @@ const seed = () => {
   // Auto-confirm all existing users for development
   db.prepare("UPDATE users SET is_confirmed = 1").run();
 };
-seed();
+try {
+  seed();
+} catch (e) {
+  console.error("Seeding failed:", e);
+}
 
 async function startServer() {
   console.log("Starting server initialization...");
