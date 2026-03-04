@@ -1039,8 +1039,21 @@ async function startServer() {
 
     res.json(lecture || null);
   });
-  app.post("/api/user/profile", authenticate, (req: any, res) => {
+  app.post("/api/user/profile", authenticate, async (req: any, res) => {
     const { name, surname, phone, bio, group_name, study_type } = req.body;
+    if (firestore) {
+      try {
+        await firestore.collection('users').doc(req.user.id.toString()).update({
+          name, surname, phone, bio, group_name, study_type
+        });
+        const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
+        const user = userSnap.data();
+        if (user) delete user.password;
+        return res.json(user);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     try {
       db.prepare(`
         UPDATE users 
@@ -1056,7 +1069,15 @@ async function startServer() {
     }
   });
 
-  app.post("/api/user/verify-email", authenticate, (req: any, res) => {
+  app.post("/api/user/verify-email", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        await firestore.collection('users').doc(req.user.id.toString()).update({ email_verified: 1 });
+        return res.json({ success: true, message: "Emaili u verifikua me sukses!" });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     try {
       db.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").run(req.user.id);
       res.json({ success: true, message: "Emaili u verifikua me sukses!" });
@@ -1141,7 +1162,25 @@ async function startServer() {
     }
   });
 
-  app.get("/api/user/me", authenticate, (req: any, res) => {
+  app.get("/api/user/me", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
+        const user = userSnap.data();
+        if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+
+        const memberSnap = await firestore.collection('class_members').where('user_id', '==', user.id).get();
+        const member = memberSnap.empty ? null : memberSnap.docs[0].data();
+
+        return res.json({
+          ...user,
+          class_status: member?.status,
+          is_class_admin: member?.is_admin
+        });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     const user = db.prepare(`
       SELECT u.id, u.name, u.surname, u.email, u.role, u.class_code, u.program, u.year, u.group_name, u.study_type, u.phone, u.bio, u.profile_photo, u.is_confirmed, u.email_verified,
              cm.status as class_status, cm.is_admin as is_class_admin
@@ -1152,9 +1191,17 @@ async function startServer() {
     res.json(user);
   });
 
-  app.post("/api/user/profile-photo", authenticate, upload.single('photo'), (req: any, res) => {
+  app.post("/api/user/profile-photo", authenticate, upload.single('photo'), async (req: any, res) => {
     if (!req.file) return res.status(400).json({ error: "Nuk u ngarkua asnjë foto" });
     const photoPath = `/uploads/${req.file.filename}`;
+    if (firestore) {
+      try {
+        await firestore.collection('users').doc(req.user.id.toString()).update({ profile_photo: photoPath });
+        return res.json({ photoPath });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     db.prepare("UPDATE users SET profile_photo = ? WHERE id = ?").run(photoPath, req.user.id);
     res.json({ photoPath });
   });
@@ -1162,10 +1209,50 @@ async function startServer() {
   // Study Sessions
   const activeTimeouts = new Map<number, NodeJS.Timeout>();
 
-  app.post("/api/study/start", authenticate, (req: any, res) => {
+  app.post("/api/study/start", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
     const { classId, subject, duration } = req.body;
     
+    if (firestore) {
+      try {
+        // Close previous sessions
+        const prevSessions = await firestore.collection('study_sessions')
+          .where('teacher_id', '==', req.user.id)
+          .where('status', '==', 'ACTIVE')
+          .get();
+        
+        const batch = firestore.batch();
+        prevSessions.forEach(doc => batch.update(doc.ref, { status: 'COMPLETED' }));
+        
+        const sessionRef = firestore.collection('study_sessions').doc();
+        const sessionId = sessionRef.id;
+        batch.set(sessionRef, {
+          id: sessionId,
+          teacher_id: req.user.id,
+          class_id: classId,
+          subject,
+          duration,
+          status: 'ACTIVE',
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        await batch.commit();
+        io.emit("study_session_start", { sessionId, classId, subject, duration, teacherName: req.user.name });
+        
+        // Timeout logic (limited on serverless)
+        setTimeout(async () => {
+          try {
+            await firestore.collection('study_sessions').doc(sessionId).update({ status: 'COMPLETED' });
+            io.emit("study_session_end", { sessionId, auto: true });
+          } catch (e) {}
+        }, duration * 60 * 1000);
+
+        return res.json({ sessionId });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     // Close any previous active sessions for this teacher
     db.prepare("UPDATE study_sessions SET status = 'COMPLETED' WHERE teacher_id = ? AND status = 'ACTIVE'").run(req.user.id);
     
@@ -1192,10 +1279,20 @@ async function startServer() {
     res.json({ sessionId });
   });
 
-  app.post("/api/study/end", authenticate, (req: any, res) => {
+  app.post("/api/study/end", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
     const { sessionId } = req.body;
     
+    if (firestore) {
+      try {
+        await firestore.collection('study_sessions').doc(sessionId.toString()).update({ status: 'COMPLETED' });
+        io.emit("study_session_end", { sessionId, auto: false });
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     db.prepare("UPDATE study_sessions SET status = 'COMPLETED' WHERE id = ?").run(sessionId);
     
     // Clear timeouts
@@ -1210,21 +1307,68 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post("/api/user/mark-verified-shown", authenticate, (req: any, res) => {
+  app.post("/api/user/mark-verified-shown", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        await firestore.collection('users').doc(req.user.id.toString()).update({ email_verified_shown: 1 });
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     db.prepare("UPDATE users SET email_verified_shown = 1 WHERE id = ?").run(req.user.id);
     res.json({ success: true });
   });
 
-  app.post("/api/study/confirm", authenticate, (req: any, res) => {
+  app.post("/api/study/confirm", authenticate, async (req: any, res) => {
     const { sessionId } = req.body;
+    if (firestore) {
+      try {
+        await firestore.collection('session_presence').add({
+          session_id: sessionId,
+          user_id: req.user.id,
+          is_verified: 0,
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        io.emit("presence_confirmed", { sessionId, userId: req.user.id, userName: req.user.name });
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     db.prepare("INSERT INTO session_presence (session_id, user_id) VALUES (?, ?)").run(sessionId, req.user.id);
     io.emit("presence_confirmed", { sessionId, userId: req.user.id, userName: req.user.name });
     res.json({ success: true });
   });
 
-  app.post("/api/study/verify", authenticate, (req: any, res) => {
+  app.post("/api/study/verify", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
     const { sessionId, userId } = req.body;
+    
+    if (firestore) {
+      try {
+        const snap = await firestore.collection('session_presence')
+          .where('session_id', '==', sessionId)
+          .where('user_id', '==', userId)
+          .get();
+        
+        const batch = firestore.batch();
+        snap.forEach(doc => batch.update(doc.ref, { is_verified: 1 }));
+        
+        batch.set(firestore.collection('attendance').doc(), {
+          user_id: userId,
+          status: 'PRESENT',
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        await batch.commit();
+        io.emit("presence_verified", { sessionId, userId });
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     db.prepare("UPDATE session_presence SET is_verified = 1 WHERE session_id = ? AND user_id = ?").run(sessionId, userId);
     
     // Log to attendance
@@ -1234,7 +1378,60 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get("/api/study/active", authenticate, (req: any, res) => {
+  app.get("/api/study/active", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        let session;
+        if (req.user.role === 'TEACHER') {
+          const snap = await firestore.collection('study_sessions')
+            .where('status', '==', 'ACTIVE')
+            .where('teacher_id', '==', req.user.id)
+            .orderBy('created_at', 'desc')
+            .limit(1)
+            .get();
+          session = snap.empty ? null : snap.docs[0].data();
+        } else {
+          const memberSnap = await firestore.collection('class_members')
+            .where('user_id', '==', req.user.id)
+            .where('status', '==', 'CONFIRMED')
+            .get();
+          
+          if (memberSnap.empty) return res.json(null);
+          const classId = memberSnap.docs[0].data().class_id;
+          
+          const snap = await firestore.collection('study_sessions')
+            .where('status', '==', 'ACTIVE')
+            .where('class_id', '==', classId)
+            .orderBy('created_at', 'desc')
+            .limit(1)
+            .get();
+          
+          if (!snap.empty) {
+            session = snap.docs[0].data();
+            const teacherSnap = await firestore.collection('users').doc(session.teacher_id.toString()).get();
+            session.teacherName = teacherSnap.data()?.name;
+          }
+        }
+
+        if (!session) return res.json(null);
+
+        const presenceSnap = await firestore.collection('session_presence')
+          .where('session_id', '==', session.id)
+          .get();
+        
+        const presence = await Promise.all(presenceSnap.docs.map(async doc => {
+          const data = doc.data();
+          const uSnap = await firestore.collection('users').doc(data.user_id.toString()).get();
+          return { ...data, userName: uSnap.data()?.name };
+        }));
+
+        return res.json({ ...session, presence });
+      } catch (e) {
+        console.error("Firestore Active Study Error:", e);
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     let session;
     if (req.user.role === 'TEACHER') {
       session = db.prepare("SELECT * FROM study_sessions WHERE status = 'ACTIVE' AND teacher_id = ? ORDER BY created_at DESC LIMIT 1").get(req.user.id);
@@ -1273,7 +1470,31 @@ async function startServer() {
   });
 
   // Tests
-  app.get("/api/tests", authenticate, (req: any, res) => {
+  app.get("/api/tests", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        let tests;
+        if (req.user.role === 'TEACHER') {
+          const snap = await firestore.collection('tests')
+            .where('teacher_id', '==', req.user.id)
+            .orderBy('created_at', 'desc')
+            .get();
+          tests = snap.docs.map(doc => doc.data());
+        } else {
+          const snap = await firestore.collection('tests')
+            .where('status', 'in', ['ACTIVE', 'IN_PROGRESS', 'PUBLISHED'])
+            .where('program', '==', req.user.program)
+            .where('year', '==', req.user.year)
+            .where('group_name', '==', req.user.group_name)
+            .orderBy('created_at', 'desc')
+            .get();
+          tests = snap.docs.map(doc => doc.data());
+        }
+        return res.json(tests);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     let tests;
     if (req.user.role === 'TEACHER') {
       tests = db.prepare("SELECT * FROM tests WHERE teacher_id = ? ORDER BY created_at DESC").all(req.user.id);
@@ -1284,9 +1505,52 @@ async function startServer() {
     res.json(tests);
   });
 
-  app.post("/api/tests", authenticate, (req: any, res) => {
+  app.post("/api/tests", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të krijojnë teste" });
     const { title, description, duration, totalPoints, testDate, program, year, group_name } = req.body;
+    
+    if (firestore) {
+      try {
+        const testRef = firestore.collection('tests').doc();
+        const testId = testRef.id;
+        const testData = {
+          id: testId,
+          title, description, duration, total_points: totalPoints,
+          teacher_id: req.user.id,
+          test_date: testDate,
+          program, year, group_name,
+          status: 'DRAFT',
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await testRef.set(testData);
+        
+        // Notifications
+        const studentsSnap = await firestore.collection('users')
+          .where('role', '==', 'STUDENT')
+          .where('program', '==', program)
+          .where('year', '==', year)
+          .where('group_name', '==', group_name)
+          .get();
+        
+        const batch = firestore.batch();
+        studentsSnap.forEach(doc => {
+          batch.set(firestore.collection('notifications').doc(), {
+            user_id: doc.id,
+            title: "Test i Ri: " + title,
+            content: `Mësuesi ${req.user.name} ka caktuar një test për datën ${testDate}.`,
+            type: 'TEST',
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          });
+        });
+        await batch.commit();
+
+        return res.json({ id: testId });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     const info = db.prepare("INSERT INTO tests (title, description, duration, total_points, teacher_id, test_date, program, year, group_name, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')")
       .run(title, description, duration, totalPoints, req.user.id, testDate, program, year, group_name);
     
@@ -1300,9 +1564,22 @@ async function startServer() {
     res.json({ id: info.lastInsertRowid });
   });
 
-  app.patch("/api/tests/:id/status", authenticate, (req: any, res) => {
+  app.patch("/api/tests/:id/status", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të ndryshojnë statusin" });
     const { status } = req.body;
+    
+    if (firestore) {
+      try {
+        await firestore.collection('tests').doc(req.params.id).update({ status });
+        if (status === 'ACTIVE') {
+          io.emit("test_distributed", { testId: req.params.id, title: "Test i ri u shpërnda!" });
+        }
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     db.prepare("UPDATE tests SET status = ? WHERE id = ?").run(status, req.params.id);
     
     if (status === 'ACTIVE') {
@@ -1312,29 +1589,99 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get("/api/tests/:id", authenticate, (req: any, res) => {
+  app.get("/api/tests/:id", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const doc = await firestore.collection('tests').doc(req.params.id).get();
+        return res.json(doc.data());
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     const test = db.prepare("SELECT * FROM tests WHERE id = ?").get(req.params.id);
     res.json(test);
   });
 
   // Questions
-  app.get("/api/tests/:id/questions", authenticate, (req, res) => {
+  app.get("/api/tests/:id/questions", authenticate, async (req, res) => {
+    if (firestore) {
+      try {
+        const snap = await firestore.collection('questions').where('test_id', '==', req.params.id).get();
+        const questions = snap.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            content: data.content,
+            type: data.type,
+            options: typeof data.options === 'string' ? JSON.parse(data.options) : data.options,
+            points: data.points,
+            correct_answer: data.correct_answer
+          };
+        });
+        return res.json(questions);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     const questions = db.prepare("SELECT id, content, type, options, points, correct_answer FROM questions WHERE test_id = ?").all(req.params.id);
     res.json(questions);
   });
 
-  app.post("/api/tests/:id/questions", authenticate, (req: any, res) => {
+  app.post("/api/tests/:id/questions", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të shtojnë pyetje" });
     const { content, type, options, points, correct_answer } = req.body;
+    
+    if (firestore) {
+      try {
+        const qRef = firestore.collection('questions').doc();
+        await qRef.set({
+          id: qRef.id,
+          test_id: req.params.id,
+          content, type,
+          options: options ? JSON.stringify(options) : null,
+          points, correct_answer
+        });
+        return res.json({ id: qRef.id });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     const info = db.prepare("INSERT INTO questions (test_id, content, type, options, points, correct_answer) VALUES (?, ?, ?, ?, ?, ?)")
       .run(req.params.id, content, type, options ? JSON.stringify(options) : null, points, correct_answer);
     res.json({ id: info.lastInsertRowid });
   });
 
   // Test Attempts & Participation
-  app.post("/api/tests/:id/join", authenticate, (req: any, res) => {
+  app.post("/api/tests/:id/join", authenticate, async (req: any, res) => {
     if (req.user.role !== 'STUDENT') return res.status(403).json({ error: "Vetëm studentët mund të hyjnë në test" });
     
+    if (firestore) {
+      try {
+        const snap = await firestore.collection('test_attempts')
+          .where('test_id', '==', req.params.id)
+          .where('user_id', '==', req.user.id)
+          .get();
+        
+        if (!snap.empty) return res.json(snap.docs[0].data());
+
+        const attemptRef = firestore.collection('test_attempts').doc();
+        const attemptData = {
+          id: attemptRef.id,
+          test_id: req.params.id,
+          user_id: req.user.id,
+          status: 'STARTED',
+          start_time: admin.firestore.FieldValue.serverTimestamp()
+        };
+        await attemptRef.set(attemptData);
+        
+        io.emit("student_joined_test", { testId: req.params.id, studentName: req.user.name, userId: req.user.id });
+        return res.json(attemptData);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     // Check if already joined
     const existing = db.prepare("SELECT * FROM test_attempts WHERE test_id = ? AND user_id = ?").get(req.params.id, req.user.id);
     if (existing) return res.json(existing);
@@ -1348,9 +1695,35 @@ async function startServer() {
     res.json(attempt);
   });
 
-  app.post("/api/attempts/:id/save", authenticate, (req: any, res) => {
+  app.post("/api/attempts/:id/save", authenticate, async (req: any, res) => {
     const { answers } = req.body; // Array of { questionId, answerText }
     
+    if (firestore) {
+      try {
+        const batch = firestore.batch();
+        for (const ans of answers) {
+          const ansSnap = await firestore.collection('test_answers')
+            .where('attempt_id', '==', req.params.id)
+            .where('question_id', '==', ans.questionId)
+            .get();
+          
+          if (!ansSnap.empty) {
+            batch.update(ansSnap.docs[0].ref, { answer_text: ans.answerText });
+          } else {
+            batch.set(firestore.collection('test_answers').doc(), {
+              attempt_id: req.params.id,
+              question_id: ans.questionId,
+              answer_text: ans.answerText
+            });
+          }
+        }
+        await batch.commit();
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     db.transaction(() => {
       for (const ans of answers) {
         const existing = db.prepare("SELECT id FROM test_answers WHERE attempt_id = ? AND question_id = ?")
@@ -1369,7 +1742,22 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.post("/api/attempts/:id/submit", authenticate, (req: any, res) => {
+  app.post("/api/attempts/:id/submit", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        await firestore.collection('test_attempts').doc(req.params.id).update({
+          status: 'SUBMITTED',
+          end_time: admin.firestore.FieldValue.serverTimestamp()
+        });
+        const attemptSnap = await firestore.collection('test_attempts').doc(req.params.id).get();
+        const attempt = attemptSnap.data();
+        io.emit("student_submitted_test", { testId: attempt?.test_id, studentName: req.user.name, userId: req.user.id });
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     db.prepare("UPDATE test_attempts SET status = 'SUBMITTED', end_time = CURRENT_TIMESTAMP WHERE id = ?")
       .run(req.params.id);
     
@@ -1379,9 +1767,29 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get("/api/tests/:id/monitoring", authenticate, (req: any, res) => {
+  app.get("/api/tests/:id/monitoring", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të monitorojnë" });
     
+    if (firestore) {
+      try {
+        const snap = await firestore.collection('test_attempts').where('test_id', '==', req.params.id).get();
+        const participants = await Promise.all(snap.docs.map(async doc => {
+          const data = doc.data();
+          const uSnap = await firestore.collection('users').doc(data.user_id.toString()).get();
+          return {
+            name: uSnap.data()?.name,
+            status: data.status,
+            start_time: data.start_time?.toDate()?.toISOString(),
+            end_time: data.end_time?.toDate()?.toISOString(),
+            attempt_id: doc.id
+          };
+        }));
+        return res.json(participants);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     const participants = db.prepare(`
       SELECT u.name, ta.status, ta.start_time, ta.end_time, ta.id as attempt_id
       FROM test_attempts ta
@@ -1392,7 +1800,46 @@ async function startServer() {
     res.json(participants);
   });
 
-  app.get("/api/attempts/:id/details", authenticate, (req: any, res) => {
+  app.get("/api/attempts/:id/details", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const attemptSnap = await firestore.collection('test_attempts').doc(req.params.id).get();
+        const attempt = attemptSnap.data();
+        if (!attempt) return res.status(404).json({ error: "Tentativa nuk u gjet" });
+
+        const userSnap = await firestore.collection('users').doc(attempt.user_id.toString()).get();
+        const testSnap = await firestore.collection('tests').doc(attempt.test_id.toString()).get();
+        
+        const answersSnap = await firestore.collection('test_answers').where('attempt_id', '==', req.params.id).get();
+        const answers = await Promise.all(answersSnap.docs.map(async doc => {
+          const data = doc.data();
+          const qSnap = await firestore.collection('questions').doc(data.question_id.toString()).get();
+          const q = qSnap.data();
+          return {
+            ...data,
+            id: doc.id,
+            question_text: q?.content,
+            question_type: q?.type,
+            options: q?.options,
+            max_points: q?.points,
+            correct_answer: q?.correct_answer
+          };
+        }));
+
+        return res.json({
+          attempt: {
+            ...attempt,
+            student_name: userSnap.data()?.name,
+            test_title: testSnap.data()?.title
+          },
+          answers
+        });
+      } catch (e) {
+        console.error("Firestore Attempt Details Error:", e);
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     const attempt = db.prepare(`
       SELECT ta.*, u.name as student_name, t.title as test_title
       FROM test_attempts ta
@@ -1411,10 +1858,64 @@ async function startServer() {
     res.json({ attempt, answers });
   });
 
-  app.post("/api/attempts/:id/grade", authenticate, (req: any, res) => {
+  app.post("/api/attempts/:id/grade", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të vlerësojnë" });
     const { grades, feedback, finalGrade } = req.body; // Array of { answerId, points, isCorrect }, finalGrade 4-10
     
+    if (firestore) {
+      try {
+        const batch = firestore.batch();
+        let totalScore = 0;
+        for (const g of grades) {
+          batch.update(firestore.collection('test_answers').doc(g.answerId), {
+            points_awarded: g.points,
+            is_correct: g.isCorrect ? 1 : 0
+          });
+          totalScore += g.points;
+        }
+        
+        batch.update(firestore.collection('test_attempts').doc(req.params.id), {
+          total_score: totalScore,
+          grade: finalGrade,
+          status: 'GRADED',
+          feedback
+        });
+        
+        const attemptSnap = await firestore.collection('test_attempts').doc(req.params.id).get();
+        const attempt = attemptSnap.data();
+        if (attempt) {
+          const testSnap = await firestore.collection('tests').doc(attempt.test_id.toString()).get();
+          const test = testSnap.data();
+          const teacherSnap = await firestore.collection('users').doc(test?.teacher_id.toString()).get();
+          const teacher = teacherSnap.data();
+
+          const logType = attempt.is_exam ? 'EXAM' : 'TEST';
+          batch.set(firestore.collection('performance_logs').doc(), {
+            user_id: attempt.user_id,
+            type: logType,
+            score: finalGrade,
+            max_score: 10,
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          });
+
+          const notificationTitle = attempt.is_exam ? "Rezultati i Provimit: " : "Rezultati i Testit: ";
+          batch.set(firestore.collection('notifications').doc(), {
+            user_id: attempt.user_id,
+            title: notificationTitle + test?.title,
+            content: `Mësuesi ${teacher?.name} ju ka vlerësuar me notën ${finalGrade}.`,
+            type: 'GRADE',
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          });
+        }
+        
+        await batch.commit();
+        return res.json({ success: true, totalScore });
+      } catch (e) {
+        console.error("Firestore Grade Error:", e);
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     let totalScore = 0;
     db.transaction(() => {
       for (const g of grades) {
@@ -1449,7 +1950,34 @@ async function startServer() {
     res.json({ success: true, totalScore });
   });
 
-  app.get("/api/tests/:id/analytics", authenticate, (req: any, res) => {
+  app.get("/api/tests/:id/analytics", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const attemptsSnap = await firestore.collection('test_attempts')
+          .where('test_id', '==', req.params.id)
+          .where('status', '==', 'GRADED')
+          .get();
+        
+        const testSnap = await firestore.collection('tests').doc(req.params.id).get();
+        const test = testSnap.data();
+        
+        if (attemptsSnap.empty) return res.json({ message: "Nuk ka të dhëna për analizë" });
+
+        const scores = attemptsSnap.docs.map(doc => doc.data().total_score);
+        const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+        const passRate = (scores.filter(s => s >= (test?.total_points || 100) * 0.4).length / scores.length) * 100;
+
+        return res.json({
+          averageScore: avg,
+          passRate,
+          totalAttempts: scores.length,
+          distribution: scores
+        });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     const attempts = db.prepare("SELECT total_score FROM test_attempts WHERE test_id = ? AND status = 'GRADED'").all(req.params.id) as any[];
     const test = db.prepare("SELECT total_points FROM tests WHERE id = ?").get(req.params.id) as any;
     
@@ -1467,9 +1995,42 @@ async function startServer() {
     });
   });
 
-  app.get("/api/analytics/student/:id", authenticate, (req: any, res) => {
+  app.get("/api/analytics/student/:id", authenticate, async (req: any, res) => {
     const userId = req.params.id === 'me' ? req.user.id : req.params.id;
     
+    if (firestore) {
+      try {
+        const logsSnap = await firestore.collection('performance_logs')
+          .where('user_id', '==', userId.toString())
+          .orderBy('created_at', 'asc')
+          .get();
+        
+        const logs = logsSnap.docs.map(doc => {
+          const data = doc.data();
+          return {
+            ...data,
+            timestamp: data.created_at?.toDate()?.toISOString()
+          };
+        });
+
+        const attendanceSnap = await firestore.collection('attendance')
+          .where('user_id', '==', userId.toString())
+          .get();
+        
+        const attendanceCounts: Record<string, number> = {};
+        attendanceSnap.docs.forEach(doc => {
+          const status = doc.data().status;
+          attendanceCounts[status] = (attendanceCounts[status] || 0) + 1;
+        });
+
+        const attendance = Object.entries(attendanceCounts).map(([status, count]) => ({ status, count }));
+
+        return res.json({ logs, attendance });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     const logs = db.prepare(`
       SELECT type, score, max_score, timestamp 
       FROM performance_logs 
@@ -1487,9 +2048,42 @@ async function startServer() {
     res.json({ logs, attendance });
   });
 
-  app.get("/api/analytics/class", authenticate, (req: any, res) => {
+  app.get("/api/analytics/class", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të shohin analitikën e klasës" });
     
+    if (firestore) {
+      try {
+        const logsSnap = await firestore.collection('performance_logs').get();
+        const logs = logsSnap.docs.map(doc => doc.data());
+
+        const userPerformance: Record<string, { total: number, count: number }> = {};
+        logs.forEach(log => {
+          if (!userPerformance[log.user_id]) userPerformance[log.user_id] = { total: 0, count: 0 };
+          userPerformance[log.user_id].total += log.score / log.max_score;
+          userPerformance[log.user_id].count += 1;
+        });
+
+        const topImprovers = await Promise.all(
+          Object.entries(userPerformance)
+            .map(async ([userId, perf]) => {
+              const uSnap = await firestore.collection('users').doc(userId).get();
+              return {
+                name: uSnap.data()?.name,
+                avg_perf: perf.total / perf.count
+              };
+            })
+        );
+        topImprovers.sort((a, b) => b.avg_perf - a.avg_perf);
+
+        return res.json({ 
+          topImprovers: topImprovers.slice(0, 5),
+          classProgress: [] // Simplified for now
+        });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     const topImprovers = db.prepare(`
       SELECT u.name, AVG(score/max_score) as avg_perf
       FROM performance_logs pl
@@ -1516,7 +2110,24 @@ async function startServer() {
   });
 
   // Live Questions
-  app.get("/api/live-questions", authenticate, (req: any, res) => {
+  app.get("/api/live-questions", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const snap = await firestore.collection('live_questions').orderBy('created_at', 'desc').get();
+        const questions = await Promise.all(snap.docs.map(async doc => {
+          const data = doc.data();
+          const uSnap = await firestore.collection('users').doc(data.student_id.toString()).get();
+          return {
+            ...data,
+            id: doc.id,
+            student_name: uSnap.data()?.name
+          };
+        }));
+        return res.json(questions);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     const questions = db.prepare(`
       SELECT lq.*, u.name as student_name 
       FROM live_questions lq 
@@ -1526,10 +2137,38 @@ async function startServer() {
     res.json(questions);
   });
 
-  app.post("/api/live-questions", authenticate, (req: any, res) => {
+  app.post("/api/live-questions", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
     const { content } = req.body;
     
+    if (firestore) {
+      try {
+        const studentsSnap = await firestore.collection('users').where('role', '==', 'STUDENT').where('is_confirmed', '==', 1).get();
+        if (studentsSnap.empty) return res.status(400).json({ error: "Nuk ka studentë të konfirmuar në klasë" });
+        
+        const randomIndex = Math.floor(Math.random() * studentsSnap.size);
+        const studentDoc = studentsSnap.docs[randomIndex];
+        const student = studentDoc.data();
+
+        const qRef = firestore.collection('live_questions').doc();
+        const question = {
+          id: qRef.id,
+          teacher_id: req.user.id,
+          student_id: student.id,
+          student_name: student.name,
+          content,
+          status: 'PENDING',
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await qRef.set(question);
+        io.emit("new_live_question", question);
+        return res.json(question);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     // Auto-select random student
     const student = db.prepare("SELECT id, name FROM users WHERE role = 'STUDENT' AND is_confirmed = 1 ORDER BY RANDOM() LIMIT 1").get() as any;
     if (!student) return res.status(400).json({ error: "Nuk ka studentë të konfirmuar në klasë" });
@@ -1549,7 +2188,22 @@ async function startServer() {
     res.json(question);
   });
 
-  app.post("/api/live-questions/:id/confirm", authenticate, (req: any, res) => {
+  app.post("/api/live-questions/:id/confirm", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const qRef = firestore.collection('live_questions').doc(req.params.id);
+        const doc = await qRef.get();
+        const question = doc.data();
+        if (question?.student_id !== req.user.id) return res.status(403).json({ error: "Pa autorizuar" });
+        
+        await qRef.update({ status: 'CONFIRMED' });
+        const updated = { ...question, status: 'CONFIRMED' };
+        io.emit("live_question_update", updated);
+        return res.json(updated);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     const question = db.prepare("SELECT * FROM live_questions WHERE id = ?").get(req.params.id) as any;
     if (question.student_id !== req.user.id) return res.status(403).json({ error: "Pa autorizuar" });
     
@@ -1559,8 +2213,23 @@ async function startServer() {
     res.json(updated);
   });
 
-  app.post("/api/live-questions/:id/answer", authenticate, (req: any, res) => {
+  app.post("/api/live-questions/:id/answer", authenticate, async (req: any, res) => {
     const { answer } = req.body;
+    if (firestore) {
+      try {
+        const qRef = firestore.collection('live_questions').doc(req.params.id);
+        const doc = await qRef.get();
+        const question = doc.data();
+        if (question?.student_id !== req.user.id) return res.status(403).json({ error: "Pa autorizuar" });
+        
+        await qRef.update({ answer, status: 'ANSWERED' });
+        const updated = { ...question, answer, status: 'ANSWERED' };
+        io.emit("live_question_update", updated);
+        return res.json(updated);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     const question = db.prepare("SELECT * FROM live_questions WHERE id = ?").get(req.params.id) as any;
     if (question.student_id !== req.user.id) return res.status(403).json({ error: "Pa autorizuar" });
     
@@ -1570,10 +2239,33 @@ async function startServer() {
     res.json(updated);
   });
 
-  app.post("/api/live-questions/:id/grade", authenticate, (req: any, res) => {
+  app.post("/api/live-questions/:id/grade", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
     const { score } = req.body;
     
+    if (firestore) {
+      try {
+        const qRef = firestore.collection('live_questions').doc(req.params.id);
+        await qRef.update({ score, status: 'GRADED' });
+        const doc = await qRef.get();
+        const question = doc.data();
+        
+        if (question) {
+          await firestore.collection('performance_logs').add({
+            user_id: question.student_id,
+            type: 'TEST',
+            score,
+            max_score: 100,
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          });
+          io.emit("live_question_update", { ...question, score, status: 'GRADED' });
+        }
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     db.prepare("UPDATE live_questions SET score = ?, status = 'GRADED' WHERE id = ?").run(score, req.params.id);
     const question = db.prepare("SELECT * FROM live_questions WHERE id = ?").get(req.params.id) as any;
     
@@ -1586,13 +2278,53 @@ async function startServer() {
   });
 
   // Notifications
-  app.get("/api/notifications", authenticate, (req: any, res) => {
+  app.get("/api/notifications", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const snap = await firestore.collection('notifications')
+          .where('user_id', '==', req.user.id.toString())
+          .orderBy('created_at', 'desc')
+          .limit(20)
+          .get();
+        return res.json(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     const notifications = db.prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC").all(req.user.id);
     res.json(notifications);
   });
 
   // Assignments
-  app.get("/api/assignments", authenticate, (req: any, res) => {
+  app.get("/api/assignments", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        let assignments;
+        if (req.user.role === 'TEACHER') {
+          const snap = await firestore.collection('assignments').where('teacher_id', '==', req.user.id).get();
+          assignments = await Promise.all(snap.docs.map(async doc => {
+            const data = doc.data();
+            const uSnap = await firestore.collection('users').doc(data.teacher_id.toString()).get();
+            return { ...data, teacher_name: uSnap.data()?.name };
+          }));
+        } else {
+          const snap = await firestore.collection('assignments')
+            .where('status', '==', 'PUBLISHED')
+            .where('program', '==', req.user.program)
+            .where('year', '==', req.user.year)
+            .where('group_name', '==', req.user.group_name)
+            .get();
+          assignments = await Promise.all(snap.docs.map(async doc => {
+            const data = doc.data();
+            const uSnap = await firestore.collection('users').doc(data.teacher_id.toString()).get();
+            return { ...data, teacher_name: uSnap.data()?.name };
+          }));
+        }
+        return res.json(assignments);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     let assignments;
     if (req.user.role === 'TEACHER') {
       assignments = db.prepare(`
@@ -1612,9 +2344,55 @@ async function startServer() {
     res.json(assignments);
   });
 
-  app.post("/api/assignments", authenticate, (req: any, res) => {
+  app.post("/api/assignments", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të krijojnë detyra" });
     const { title, description, deadline, materials, maxPoints, submissionType, status, program, year, group_name } = req.body;
+    
+    if (firestore) {
+      try {
+        const assRef = firestore.collection('assignments').doc();
+        const assId = assRef.id;
+        await assRef.set({
+          id: assId,
+          title, description, deadline, materials,
+          max_points: maxPoints || 100,
+          submission_type: submissionType || 'BOTH',
+          status: status || 'DRAFT',
+          teacher_id: req.user.id,
+          program, year, group_name,
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        if (status === 'PUBLISHED') {
+          io.emit("new_assignment", { title, teacherName: req.user.name, program, year, group_name });
+          
+          // Notifications
+          const studentsSnap = await firestore.collection('users')
+            .where('role', '==', 'STUDENT')
+            .where('program', '==', program)
+            .where('year', '==', year)
+            .where('group_name', '==', group_name)
+            .get();
+          
+          const batch = firestore.batch();
+          studentsSnap.forEach(doc => {
+            batch.set(firestore.collection('notifications').doc(), {
+              user_id: doc.id,
+              title: "Detyrë e Re: " + title,
+              content: `Mësuesi ${req.user.name} ka caktuar një detyrë të re me afat ${deadline}.`,
+              type: 'ASSIGNMENT',
+              created_at: admin.firestore.FieldValue.serverTimestamp()
+            });
+          });
+          await batch.commit();
+        }
+
+        return res.json({ id: assId });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     const info = db.prepare("INSERT INTO assignments (title, description, deadline, materials, max_points, submission_type, status, teacher_id, program, year, group_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
       .run(title, description, deadline, materials, maxPoints || 100, submissionType || 'BOTH', status || 'DRAFT', req.user.id, program, year, group_name);
     
@@ -1625,11 +2403,34 @@ async function startServer() {
     res.json({ id: info.lastInsertRowid });
   });
 
-  app.post("/api/assignments/:id/submit", authenticate, upload.single('file'), (req: any, res) => {
+  app.post("/api/assignments/:id/submit", authenticate, upload.single('file'), async (req: any, res) => {
     if (req.user.role !== 'STUDENT') return res.status(403).json({ error: "Vetëm studentët mund të dorëzojnë detyra" });
     const { content } = req.body;
     const filePath = req.file ? `/uploads/${req.file.filename}` : null;
     
+    if (firestore) {
+      try {
+        const assSnap = await firestore.collection('assignments').doc(req.params.id).get();
+        const assignment = assSnap.data();
+        const isLate = assignment && new Date() > new Date(assignment.deadline) ? 1 : 0;
+
+        const subRef = firestore.collection('submissions').doc();
+        await subRef.set({
+          id: subRef.id,
+          assignment_id: req.params.id,
+          student_id: req.user.id,
+          content: content || "",
+          file_path: filePath,
+          is_late: isLate,
+          status: 'SUBMITTED',
+          submitted_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        return res.json({ id: subRef.id });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     const assignment = db.prepare("SELECT deadline FROM assignments WHERE id = ?").get(req.params.id) as any;
     const isLate = assignment && new Date() > new Date(assignment.deadline) ? 1 : 0;
 
@@ -1709,8 +2510,25 @@ async function startServer() {
     res.json(messages);
   });
 
-  app.get("/api/assignments/:id/submissions", authenticate, (req: any, res) => {
+  app.get("/api/assignments/:id/submissions", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të shohin dorëzimet" });
+    if (firestore) {
+      try {
+        const snap = await firestore.collection('submissions').where('assignment_id', '==', req.params.id).get();
+        const submissions = await Promise.all(snap.docs.map(async doc => {
+          const data = doc.data();
+          const uSnap = await firestore.collection('users').doc(data.student_id.toString()).get();
+          return {
+            ...data,
+            id: doc.id,
+            student_name: uSnap.data()?.name
+          };
+        }));
+        return res.json(submissions);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     const submissions = db.prepare(`
       SELECT s.*, u.name as student_name 
       FROM submissions s 
@@ -1720,10 +2538,51 @@ async function startServer() {
     res.json(submissions);
   });
 
-  app.post("/api/submissions/:id/grade", authenticate, (req: any, res) => {
+  app.post("/api/submissions/:id/grade", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Vetëm mësuesit mund të vlerësojnë" });
     const { points, feedback, grade } = req.body; // grade 4-10
     
+    if (firestore) {
+      try {
+        const subRef = firestore.collection('submissions').doc(req.params.id);
+        await subRef.update({
+          points,
+          grade,
+          feedback,
+          status: 'GRADED',
+          graded_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        const subSnap = await subRef.get();
+        const sub = subSnap.data();
+        if (sub) {
+          const assSnap = await firestore.collection('assignments').doc(sub.assignment_id.toString()).get();
+          const assignment = assSnap.data();
+          const teacherSnap = await firestore.collection('users').doc(assignment?.teacher_id.toString()).get();
+          const teacher = teacherSnap.data();
+
+          await firestore.collection('performance_logs').add({
+            user_id: sub.student_id,
+            type: 'ASSIGNMENT',
+            score: grade,
+            max_score: 10,
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          });
+
+          await firestore.collection('notifications').add({
+            user_id: sub.student_id,
+            title: "Vlerësim Detyre: " + assignment?.title,
+            content: `Mësuesi ${teacher?.name} ju ka vlerësuar me notën ${grade}.`,
+            type: 'GRADE',
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          });
+        }
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     db.transaction(() => {
       db.prepare("UPDATE submissions SET points = ?, grade = ?, feedback = ?, status = 'GRADED', graded_at = CURRENT_TIMESTAMP WHERE id = ?")
         .run(points, grade, feedback, req.params.id);
@@ -1750,7 +2609,24 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  app.get("/api/my-submissions", authenticate, (req: any, res) => {
+  app.get("/api/my-submissions", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const snap = await firestore.collection('submissions').where('student_id', '==', req.user.id.toString()).get();
+        const submissions = await Promise.all(snap.docs.map(async doc => {
+          const data = doc.data();
+          const assSnap = await firestore.collection('assignments').doc(data.assignment_id.toString()).get();
+          return {
+            ...data,
+            id: doc.id,
+            assignment_title: assSnap.data()?.title
+          };
+        }));
+        return res.json(submissions);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
     const submissions = db.prepare(`
       SELECT s.*, a.title as assignment_title 
       FROM submissions s 
@@ -1802,11 +2678,49 @@ async function startServer() {
     res.json(books);
   });
 
-  app.post("/api/library/upload", authenticate, upload.single('file'), (req: any, res) => {
+  app.post("/api/library/upload", authenticate, upload.single('file'), async (req: any, res) => {
     const { title, author } = req.body;
     const filePath = req.file ? `/uploads/${req.file.filename}` : null;
     
     if (!filePath) return res.status(400).json({ error: "File i kërkuar" });
+
+    if (firestore) {
+      try {
+        const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
+        const user = userSnap.data();
+        if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+
+        const memberSnap = await firestore.collection('class_members').where('user_id', '==', req.user.id).get();
+        const member = memberSnap.empty ? null : memberSnap.docs[0].data();
+
+        if (user.role !== 'TEACHER' && !member?.is_admin) {
+          return res.status(403).json({ error: "Vetëm mësuesit dhe presidenti i klasës mund të publikojnë libra" });
+        }
+
+        const classSnap = await firestore.collection('classes')
+          .where('department', '==', user.program)
+          .where('year', '==', user.year)
+          .where('group_name', '==', user.group_name)
+          .where('study_type', '==', user.study_type)
+          .get();
+
+        if (classSnap.empty) return res.status(400).json({ error: "Klasa nuk u gjet" });
+        const classId = classSnap.docs[0].id;
+
+        const bookRef = firestore.collection('library_books').doc();
+        await bookRef.set({
+          id: bookRef.id,
+          title, author: author || "I panjohur",
+          file_path: filePath,
+          uploader_id: req.user.id,
+          class_id: classId,
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        });
+        return res.json({ id: bookRef.id });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
 
     // Check if user is teacher or class admin
     const user = db.prepare(`
@@ -1870,10 +2784,44 @@ async function startServer() {
     res.json(schedules);
   });
 
-  app.post("/api/schedules", authenticate, (req: any, res) => {
+  app.post("/api/schedules", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
-    const { day_of_week, start_time, end_time, program, year, group_name, building, classroom } = req.body;
+    const { day_of_week, start_time, end_time, program, year, group_name, building, classroom, subject } = req.body;
     
+    if (firestore) {
+      try {
+        // Check for conflicts (Simplified for now)
+        const snap = await firestore.collection('schedules')
+          .where('day_of_week', '==', day_of_week)
+          .where('program', '==', program)
+          .where('year', '==', year)
+          .where('group_name', '==', group_name)
+          .get();
+        
+        const hasConflict = snap.docs.some(doc => {
+          const s = doc.data();
+          return (start_time < s.end_time && end_time > s.start_time);
+        });
+
+        if (hasConflict) return res.status(400).json({ error: "Ka një konflikt në orar për këtë kohë" });
+
+        const schRef = firestore.collection('schedules').doc();
+        const schedule = {
+          id: schRef.id,
+          teacher_id: req.user.id,
+          teacher_name: req.user.name,
+          day_of_week, start_time, end_time,
+          program, year, group_name,
+          building, classroom, subject,
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        };
+        await schRef.set(schedule);
+        return res.json(schedule);
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     // Check for conflicts
     const conflict = db.prepare(`
       SELECT * FROM schedules 
@@ -1892,14 +2840,27 @@ async function startServer() {
     }
 
     const info = db.prepare(`
-      INSERT INTO schedules (teacher_id, day_of_week, start_time, end_time, program, year, group_name, building, classroom) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.user.id, day_of_week, start_time, end_time, program, year, group_name, building, classroom);
+      INSERT INTO schedules (teacher_id, day_of_week, start_time, end_time, program, year, group_name, building, classroom, subject) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.user.id, day_of_week, start_time, end_time, program, year, group_name, building, classroom, subject);
     res.json({ id: info.lastInsertRowid });
   });
 
-  app.delete("/api/schedules/:id", authenticate, (req: any, res) => {
+  app.delete("/api/schedules/:id", authenticate, async (req: any, res) => {
     if (req.user.role !== 'TEACHER') return res.status(403).json({ error: "Pa autorizuar" });
+    
+    if (firestore) {
+      try {
+        const schRef = firestore.collection('schedules').doc(req.params.id);
+        const doc = await schRef.get();
+        if (doc.data()?.teacher_id !== req.user.id) return res.status(403).json({ error: "Pa autorizuar" });
+        await schRef.delete();
+        return res.json({ success: true });
+      } catch (e) {
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     db.prepare("DELETE FROM schedules WHERE id = ? AND teacher_id = ?").run(req.params.id, req.user.id);
     res.json({ success: true });
   });
