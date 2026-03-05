@@ -37,27 +37,55 @@ export default function Assignments({ user, token }: { user: any, token: string 
   }, []);
 
   const fetchMySubmissions = async () => {
-    const res = await fetch('/api/my-submissions', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await res.json();
-    setMySubmissions(data);
+    try {
+      const res = await fetch('/api/my-submissions', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setMySubmissions(data);
+      } else {
+        setMySubmissions([]);
+      }
+    } catch (error) {
+      console.error("Failed to fetch my submissions:", error);
+      setMySubmissions([]);
+    }
   };
 
   const fetchAssignments = async () => {
-    const res = await fetch('/api/assignments', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await res.json();
-    setAssignments(data);
+    try {
+      const res = await fetch('/api/assignments', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setAssignments(data);
+      } else {
+        console.error("API error or invalid data format for assignments:", data);
+        setAssignments([]);
+      }
+    } catch (error) {
+      console.error("Failed to fetch assignments:", error);
+      setAssignments([]);
+    }
   };
 
   const fetchSubmissions = async (assignmentId: number) => {
-    const res = await fetch(`/api/assignments/${assignmentId}/submissions`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    const data = await res.json();
-    setSubmissions(data);
+    try {
+      const res = await fetch(`/api/assignments/${assignmentId}/submissions`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setSubmissions(data);
+      } else {
+        setSubmissions([]);
+      }
+    } catch (error) {
+      console.error("Failed to fetch submissions:", error);
+      setSubmissions([]);
+    }
   };
 
   const handleCreateAssignment = async (e: React.FormEvent) => {
@@ -161,7 +189,7 @@ export default function Assignments({ user, token }: { user: any, token: string 
             className="grid grid-cols-1 lg:grid-cols-3 gap-8"
           >
             <div className="lg:col-span-2 space-y-6">
-              {assignments.map((assignment) => (
+              {Array.isArray(assignments) && assignments.map((assignment) => (
                 <div 
                   key={assignment.id}
                   className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:border-blue-200 transition-all"

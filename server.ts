@@ -21,16 +21,33 @@ import admin from "firebase-admin";
 console.log("Server.ts is starting...");
 
 // Firebase Admin Initialization
-if (process.env.FIREBASE_PRIVATE_KEY) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    }),
-    storageBucket: `${process.env.FIREBASE_PROJECT_ID}.appspot.com`
-  });
-}
+const getFirebaseAdmin = () => {
+  if (admin.apps.length > 0) return admin.apps[0];
+  
+  const projectId = process.env.FIREBASE_PROJECT_ID?.replace(/^['"]|['"]$/g, '').trim();
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.replace(/^['"]|['"]$/g, '').trim();
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n').replace(/^['"]|['"]$/g, '').trim();
+
+  if (projectId && clientEmail && privateKey) {
+    try {
+      return admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId,
+          clientEmail,
+          privateKey,
+        }),
+        storageBucket: `${projectId}.appspot.com`
+      });
+    } catch (e) {
+      console.error("Failed to initialize Firebase Admin:", e);
+      return null;
+    }
+  }
+  return null;
+};
+
+const firebaseApp = getFirebaseAdmin();
+const firestore = firebaseApp ? firebaseApp.firestore() : null;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -57,7 +74,6 @@ try {
     transaction: (cb: any) => cb()
   };
 }
-const firestore = admin.apps.length > 0 ? admin.firestore() : null;
 const JWT_SECRET = process.env.JWT_SECRET || "fshn-secret-key-2026";
 
 // Initialize Database
@@ -1415,10 +1431,11 @@ async function startServer() {
           const snap = await firestore.collection('study_sessions')
             .where('status', '==', 'ACTIVE')
             .where('teacher_id', '==', req.user.id)
-            .orderBy('created_at', 'desc')
-            .limit(1)
             .get();
-          session = snap.empty ? null : snap.docs[0].data();
+          
+          const sessions = snap.docs.map(doc => doc.data());
+          sessions.sort((a: any, b: any) => (b.created_at?.seconds || 0) - (a.created_at?.seconds || 0));
+          session = sessions.length > 0 ? sessions[0] : null;
         } else {
           const memberSnap = await firestore.collection('class_members')
             .where('user_id', '==', req.user.id)
@@ -1431,12 +1448,13 @@ async function startServer() {
           const snap = await firestore.collection('study_sessions')
             .where('status', '==', 'ACTIVE')
             .where('class_id', '==', classId)
-            .orderBy('created_at', 'desc')
-            .limit(1)
             .get();
           
-          if (!snap.empty) {
-            session = snap.docs[0].data();
+          const sessions = snap.docs.map(doc => doc.data());
+          sessions.sort((a: any, b: any) => (b.created_at?.seconds || 0) - (a.created_at?.seconds || 0));
+          
+          if (sessions.length > 0) {
+            session = sessions[0];
             const teacherSnap = await firestore.collection('users').doc(session.teacher_id.toString()).get();
             session.teacherName = teacherSnap.data()?.name;
           }
@@ -1506,18 +1524,18 @@ async function startServer() {
         if (req.user.role === 'TEACHER') {
           const snap = await firestore.collection('tests')
             .where('teacher_id', '==', req.user.id)
-            .orderBy('created_at', 'desc')
             .get();
           tests = snap.docs.map(doc => doc.data());
+          tests.sort((a: any, b: any) => (b.created_at?.seconds || 0) - (a.created_at?.seconds || 0));
         } else {
           const snap = await firestore.collection('tests')
             .where('status', 'in', ['ACTIVE', 'IN_PROGRESS', 'PUBLISHED'])
             .where('program', '==', req.user.program)
             .where('year', '==', req.user.year)
             .where('group_name', '==', req.user.group_name)
-            .orderBy('created_at', 'desc')
             .get();
           tests = snap.docs.map(doc => doc.data());
+          tests.sort((a: any, b: any) => (b.created_at?.seconds || 0) - (a.created_at?.seconds || 0));
         }
         return res.json(tests);
       } catch (e) {
@@ -2031,7 +2049,6 @@ async function startServer() {
       try {
         const logsSnap = await firestore.collection('performance_logs')
           .where('user_id', '==', userId.toString())
-          .orderBy('created_at', 'asc')
           .get();
         
         const logs = logsSnap.docs.map(doc => {
@@ -2040,6 +2057,13 @@ async function startServer() {
             ...data,
             timestamp: data.created_at?.toDate()?.toISOString()
           };
+        });
+
+        // Sort in memory to avoid composite index requirement
+        logs.sort((a: any, b: any) => {
+          const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+          const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+          return timeA - timeB;
         });
 
         const attendanceSnap = await firestore.collection('attendance')
@@ -2312,10 +2336,18 @@ async function startServer() {
       try {
         const snap = await firestore.collection('notifications')
           .where('user_id', '==', req.user.id.toString())
-          .orderBy('created_at', 'desc')
-          .limit(20)
           .get();
-        return res.json(snap.docs.map(doc => ({ ...doc.data(), id: doc.id })));
+        
+        const notifications = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+        
+        // Sort in memory to avoid composite index requirement
+        notifications.sort((a: any, b: any) => {
+          const timeA = a.created_at?.seconds || 0;
+          const timeB = b.created_at?.seconds || 0;
+          return timeB - timeA; // Newest first
+        });
+
+        return res.json(notifications.slice(0, 20));
       } catch (e) {
         return res.status(500).json({ error: "Gabim në Firebase" });
       }
@@ -2478,9 +2510,7 @@ async function startServer() {
     if (firestore) {
       try {
         let query: any = firestore.collection('messages')
-          .where('chat_type', '==', type || 'CLASS')
-          .orderBy('timestamp', 'desc')
-          .limit(100);
+          .where('chat_type', '==', type || 'CLASS');
 
         if (type === 'CLASS') {
           const userSnap = await firestore.collection('users').doc(req.user.id).get();
@@ -2500,11 +2530,23 @@ async function startServer() {
         }
 
         const messagesSnap = await query.get();
-        const messages = messagesSnap.docs.map((doc: any) => ({
-          ...doc.data(),
-          timestamp: doc.data().timestamp?.toDate()?.toISOString()
-        }));
-        return res.json(messages.reverse());
+        const messages = messagesSnap.docs.map((doc: any) => {
+          const data = doc.data();
+          return {
+            ...data,
+            id: doc.id,
+            timestamp: data.timestamp?.toDate()?.toISOString()
+          };
+        });
+
+        // Sort in memory to avoid composite index requirement
+        messages.sort((a: any, b: any) => {
+          const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+          const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+          return timeA - timeB; // Oldest first for chat display
+        });
+
+        return res.json(messages.slice(-100)); // Return last 100 messages
       } catch (e) {
         console.error("Firestore Chat Error:", e);
         return res.status(500).json({ error: "Gabim në Firebase" });
@@ -2943,6 +2985,39 @@ async function startServer() {
       }
       
       io.emit("user_status", Array.from(onlineUsers.values()));
+    });
+
+    // WebRTC Signaling for Screen Share / Live Stream
+    socket.on("stream_started", (data) => {
+      // data: { type: 'SCREEN' | 'CAMERA', classId: string }
+      socket.to(`class_${data.classId}`).emit("stream_available", {
+        teacherId: socket.id,
+        type: data.type
+      });
+    });
+
+    socket.on("stream_stopped", (data) => {
+      socket.to(`class_${data.classId}`).emit("stream_ended");
+    });
+
+    socket.on("request_stream", (data) => {
+      // data: { to: teacherSocketId }
+      io.to(data.to).emit("student_requested_stream", { from: socket.id });
+    });
+
+    socket.on("webrtc_offer", (data) => {
+      // data: { to: studentSocketId, offer: sdp }
+      io.to(data.to).emit("webrtc_offer", { from: socket.id, offer: data.offer });
+    });
+
+    socket.on("webrtc_answer", (data) => {
+      // data: { to: teacherSocketId, answer: sdp }
+      io.to(data.to).emit("webrtc_answer", { from: socket.id, answer: data.answer });
+    });
+
+    socket.on("webrtc_ice_candidate", (data) => {
+      // data: { to: targetSocketId, candidate: ice }
+      io.to(data.to).emit("webrtc_ice_candidate", { from: socket.id, candidate: data.candidate });
     });
 
     socket.on("send_message", async (msg) => {

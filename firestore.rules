@@ -14,201 +14,159 @@ service cloud.firestore {
       return request.auth.token.email_verified == true;
     }
 
+    // Allow both .edu.al and .fshnstudent.info
     function isValidDomain() {
-      return request.auth.token.email.matches('.*@fshnstudent.info$');
+      return request.auth.token.email.matches('.*@fshnstudent\\.info$') || 
+             request.auth.token.email.matches('.*@fshn\\.edu\\.al$');
     }
 
     function isStudent() {
-      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'STUDENT';
     }
 
     function isTeacher() {
-      return exists(/databases/$(database)/documents/teachers/$(request.auth.uid));
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'TEACHER';
     }
 
     function isApprovedStudent() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true;
+      return isStudent() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.is_confirmed == 1;
     }
 
     function sameUser(userId) {
       return request.auth.uid == userId;
     }
 
+    function isAdmin() {
+      return request.auth.token.email == "florianloka3@gmail.com" && request.auth.token.email_verified == true;
+    }
+
     /* =========================
-       👤 USERS (STUDENTS)
+       👤 USERS
     ==========================*/
 
     match /users/{userId} {
-
-      allow create: if isLoggedIn()
-                    && isEmailVerified()
-                    && isValidDomain();
-
-      allow read: if isLoggedIn()
-                  && sameUser(userId);
-
-      allow update: if isLoggedIn()
-                    && sameUser(userId)
-                    && !("approved" in request.resource.data); 
-
-      allow delete: if false;
+      allow create: if isLoggedIn();
+      allow read: if isLoggedIn();
+      allow update: if isLoggedIn() && (sameUser(userId) || isTeacher() || isAdmin());
+      allow delete: if isAdmin();
     }
 
     /* =========================
-       👨🏫 TEACHERS
+       🏫 CLASSES & MEMBERS
     ==========================*/
 
-    match /teachers/{teacherId} {
+    match /classes/{classId} {
+      allow read: if isLoggedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
 
-      allow create: if isLoggedIn()
-                    && isEmailVerified()
-                    && isValidDomain();
-
-      allow read, update: if isLoggedIn()
-                          && sameUser(teacherId)
-                          && isTeacher();
-
-      allow delete: if false;
+    match /class_members/{memberId} {
+      allow read: if isLoggedIn();
+      allow write: if isLoggedIn();
     }
 
     /* =========================
-       🏫 CLASSROOMS
-    ==========================*/
-
-    match /classrooms/{classroomId} {
-
-      allow read: if isLoggedIn()
-                  && isValidDomain();
-
-      allow create, update, delete: if isLoggedIn()
-                                    && isTeacher();
-    }
-
-    /* =========================
-       📝 TESTS
+       📚 ACADEMIC CONTENT
     ==========================*/
 
     match /tests/{testId} {
-
-      allow read: if isLoggedIn()
-                  && isApprovedStudent();
-
-      allow create, update, delete: if isLoggedIn()
-                                    && isTeacher();
-    }
-
-    /* =========================
-       📚 HOMEWORK
-    ==========================*/
-
-    match /homework/{homeworkId} {
-
-      allow read: if isLoggedIn()
-                  && isApprovedStudent();
-
-      allow create, update, delete: if isLoggedIn()
-                                    && isTeacher();
-    }
-
-    /* =========================
-       📊 RESULTS
-    ==========================*/
-
-    match /results/{resultId} {
-
-      allow read: if isLoggedIn()
-                  && (
-                        resource.data.studentId == request.auth.uid
-                        || isTeacher()
-                     );
-
-      allow create, update, delete: if isLoggedIn()
-                                    && isTeacher();
-    }
-
-    /* =========================
-       📅 ATTENDANCE
-    ==========================*/
-
-    match /attendance/{classroomId}/days/{date}/students/{studentId} {
-
-      allow read: if isLoggedIn()
-                  && (sameUser(studentId) || isTeacher());
-
-      // Student can confirm presence
-      allow create, update: if isLoggedIn()
-                            && sameUser(studentId)
-                            && isApprovedStudent();
-
-      // Teacher can verify
-      allow update: if isLoggedIn()
-                    && isTeacher();
-
-      allow delete: if false;
-    }
-
-    /* =========================
-       💬 CLASS CHAT (12h cleanup by Cloud Function)
-    ==========================*/
-
-    match /chats/{classroomId}/messages/{messageId} {
-
-      allow read: if isLoggedIn()
-                  && isApprovedStudent();
-
-      allow create: if isLoggedIn()
-                    && isApprovedStudent()
-                    && request.resource.data.senderId == request.auth.uid
-                    && request.resource.data.text is string
-                    && request.resource.data.text.size() < 1000;
-
-      allow update, delete: if false;
-    }
-
-    /* =========================
-       🔒 PRIVATE CHAT
-    ==========================*/
-
-    match /privateChats/{chatId}/messages/{messageId} {
-
       allow read: if isLoggedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
 
-      allow create: if isLoggedIn()
-                    && request.resource.data.senderId == request.auth.uid;
+    match /questions/{qId} {
+      allow read: if isLoggedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
 
-      allow update, delete: if false;
+    match /test_attempts/{attemptId} {
+      allow read: if isLoggedIn();
+      allow write: if isLoggedIn();
+    }
+
+    match /test_answers/{answerId} {
+      allow read: if isLoggedIn();
+      allow write: if isLoggedIn();
+    }
+
+    match /assignments/{assignmentId} {
+      allow read: if isLoggedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
+
+    match /submissions/{submissionId} {
+      allow read: if isLoggedIn();
+      allow write: if isLoggedIn();
     }
 
     /* =========================
-       🔔 NOTIFICATIONS
+       📊 PERFORMANCE & ATTENDANCE
+    ==========================*/
+
+    match /performance_logs/{logId} {
+      allow read: if isLoggedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
+
+    match /attendance/{attId} {
+      allow read: if isLoggedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
+
+    match /study_sessions/{sessionId} {
+      allow read: if isLoggedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
+
+    match /session_presence/{presenceId} {
+      allow read: if isLoggedIn();
+      allow write: if isLoggedIn();
+    }
+
+    /* =========================
+       💬 COMMUNICATION
+    ==========================*/
+
+    match /messages/{messageId} {
+      allow read: if isLoggedIn();
+      allow create: if isLoggedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /live_questions/{qId} {
+      allow read: if isLoggedIn();
+      allow write: if isLoggedIn();
+    }
+
+    /* =========================
+       🔔 NOTIFICATIONS & OTHER
     ==========================*/
 
     match /notifications/{notificationId} {
-
-      allow read: if isLoggedIn()
-                  && resource.data.userId == request.auth.uid;
-
-      allow create: if isTeacher();
-
-      allow update, delete: if false;
+      allow read: if isLoggedIn() && (resource.data.user_id == request.auth.uid || sameUser(notificationId));
+      allow write: if isTeacher() || isAdmin();
     }
 
-    /* =========================
-       🎉 EVENTS
-    ==========================*/
+    match /library_books/{bookId} {
+      allow read: if isLoggedIn();
+      allow write: if isLoggedIn();
+    }
+
+    match /schedules/{schId} {
+      allow read: if isLoggedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
 
     match /events/{eventId} {
       allow read: if isLoggedIn();
-      allow create, update, delete: if isTeacher();
+      allow write: if isTeacher() || isAdmin();
     }
-
-    /* =========================
-       📢 PUBLICATIONS
-    ==========================*/
 
     match /publications/{pubId} {
       allow read: if isLoggedIn();
-      allow create, update, delete: if isTeacher();
+      allow write: if isTeacher() || isAdmin();
     }
   }
 }

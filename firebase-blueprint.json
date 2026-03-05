@@ -1,0 +1,36 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile for students and teachers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "surname": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["STUDENT", "TEACHER"] },
+        "is_confirmed": { "type": "integer" }
+      }
+    },
+    "Class": {
+      "title": "Class",
+      "description": "Academic class or group",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "department": { "type": "string" },
+        "year": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "users": { "schema": "User", "description": "Collection of users" },
+    "classes": { "schema": "Class", "description": "Collection of classes" },
+    "class_members": { "schema": "object", "description": "Mapping of users to classes" },
+    "tests": { "schema": "object", "description": "Academic tests" },
+    "assignments": { "schema": "object", "description": "Student assignments" },
+    "messages": { "schema": "object", "description": "Chat messages" }
+  }
+}

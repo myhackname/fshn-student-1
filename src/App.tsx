@@ -122,13 +122,21 @@ const Header = () => {
   useEffect(() => {
     if (user && user.email_verified && !user.email_verified_shown) {
       setShowVerifiedMessage(true);
+      
+      // Auto-hide after 10 seconds
+      const timer = setTimeout(() => {
+        setShowVerifiedMessage(false);
+      }, 10000);
+
       // Mark as shown in backend
       fetch('/api/user/mark-verified-shown', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       }).then(() => refreshUser());
+
+      return () => clearTimeout(timer);
     }
-  }, [user, token]);
+  }, [user, token, refreshUser]);
 
   return (
     <>
@@ -138,10 +146,10 @@ const Header = () => {
             initial={{ opacity: 0, y: -50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -50 }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-green-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3"
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-blue-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 border border-white/20 backdrop-blur-md"
           >
             <CheckCircle size={20} />
-            <span className="font-bold">Faleminderit për verifikimin e emailit!</span>
+            <span className="font-bold">Email i verifikuar me sukses!</span>
             <button onClick={() => setShowVerifiedMessage(false)} className="ml-4 hover:opacity-70">
               <X size={18} />
             </button>

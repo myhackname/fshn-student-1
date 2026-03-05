@@ -105,9 +105,19 @@ export default function Tests({ user, token }: { user: any, token: string }) {
   }, [socket, selectedTest]);
 
   const fetchTests = async () => {
-    const res = await fetch('/api/tests', { headers: { 'Authorization': `Bearer ${token}` } });
-    const data = await res.json();
-    setTests(data);
+    try {
+      const res = await fetch('/api/tests', { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setTests(data);
+      } else {
+        console.error("API error or invalid data format:", data);
+        setTests([]);
+      }
+    } catch (error) {
+      console.error("Failed to fetch tests:", error);
+      setTests([]);
+    }
   };
 
   const fetchQuestions = async (testId: number) => {
@@ -313,7 +323,7 @@ export default function Tests({ user, token }: { user: any, token: string }) {
             exit={{ opacity: 0, y: -20 }}
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
           >
-            {tests.map(test => (
+            {Array.isArray(tests) && tests.map(test => (
               <div key={test.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:border-blue-200 transition-all flex flex-col">
                 <div className="flex justify-between items-start mb-4">
                   <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
