@@ -1,25 +1,13 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-let Database: any;
-// Use dynamic import inside a function to avoid top-level await
-async function getDatabase() {
-  if (Database) return Database;
-  try {
-    Database = (await import("better-sqlite3")).default;
-    return Database;
-  } catch (e) {
-    console.error("Failed to import better-sqlite3:", e);
-    return null;
-  }
-}
+import DatabaseConstructor from "better-sqlite3";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import path from "path";
 import { fileURLToPath } from "url";
 import multer from "multer";
 import fs from "fs";
-
 import nodemailer from "nodemailer";
 import admin from "firebase-admin";
 import serverless from "serverless-http";
@@ -60,28 +48,21 @@ const isNetlify = !!process.env.NETLIFY;
 const isRender = !!process.env.RENDER;
 const isProduction = process.env.NODE_ENV === "production" || isVercel || isRender || isNetlify;
 
-const __filename = isProduction ? "" : fileURLToPath(import.meta.url);
-const __dirname = isProduction ? process.cwd() : path.dirname(__filename);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let db: any;
 
-console.log(`Environment: Vercel=${isVercel}, Netlify=${isNetlify}, Render=${isRender}, Production=${isProduction}`);
+console.log(`Environment: Vercel=${isVercel}, Netlify=${isNetlify}, Render=${isRender}, Production=${isProduction}, NODE_ENV=${process.env.NODE_ENV}`);
+console.log(`Process PID: ${process.pid}`);
+
+const dbPath = (isVercel || isNetlify) ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
 
 try {
-  const dbPath = (isVercel || isNetlify) ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
-  // On Render or local, we want SQLite. On Vercel/Netlify, we mock it or use /tmp.
-  getDatabase().then(DB_CONSTRUCTOR => {
-    if (DB_CONSTRUCTOR && !isVercel && !isNetlify) {
-      db = new DB_CONSTRUCTOR(dbPath);
-      console.log("SQLite initialized at:", dbPath);
-    } else {
-      console.log(isVercel ? "SQLite disabled on Vercel" : "Database constructor is missing");
-    }
-  }).catch(err => {
-    console.error("Database initialization failed:", err);
-  });
+  db = new DatabaseConstructor(dbPath);
+  console.log("SQLite initialized at:", dbPath);
 } catch (e) {
-  console.error("Database initialization info:", e instanceof Error ? e.message : String(e));
+  console.error("Database initialization failed, using mock:", e);
   // Mock DB to prevent crashes
   db = {
     prepare: (sql: string) => ({
@@ -3131,8 +3112,10 @@ const authenticate = (req: any, res: any, next: any) => {
 setupSocket();
 
 // Vite middleware or Static serving
-if (!isProduction && !isVercel && !isNetlify) {
-  console.log("Initializing Vite middleware for development...");
+const distPath = path.join(__dirname, "dist");
+console.log(`distPath: ${distPath}`);
+if ((!isProduction && !isVercel && !isNetlify) || (!fs.existsSync(distPath) && !isVercel && !isNetlify)) {
+  console.log("Initializing Vite middleware...");
   import("vite").then(({ createServer: createViteServer }) => {
     createViteServer({
       server: { middlewareMode: true },
@@ -3146,7 +3129,6 @@ if (!isProduction && !isVercel && !isNetlify) {
   });
 } else {
   // Production mode (Render, etc.) or Vercel
-  const distPath = path.resolve(__dirname, "dist");
   console.log("Checking for static files at:", distPath);
   
   if (fs.existsSync(distPath)) {
@@ -3187,11 +3169,12 @@ if (!isProduction && !isVercel && !isNetlify) {
 }
 
 const PORT = Number(process.env.PORT) || 3000;
-if (!isVercel && !isNetlify) {
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server is live and listening on port ${PORT}`);
-  });
-}
+console.log(`Attempting to listen on port ${PORT}...`);
+console.log("Starting httpServer.listen...");
+// Always listen in AI Studio environment
+httpServer.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server is live and listening on port ${PORT}`);
+});
 
 export const handler = serverless(app);
 export default app;
