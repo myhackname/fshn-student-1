@@ -48,15 +48,19 @@ const isNetlify = !!process.env.NETLIFY;
 const isRender = !!process.env.RENDER;
 const isProduction = process.env.NODE_ENV === "production" || isVercel || isRender || isNetlify;
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const _filename = (typeof import.meta !== 'undefined' && import.meta.url) 
+  ? fileURLToPath(import.meta.url) 
+  : (typeof __filename !== 'undefined' ? __filename : '');
+const _dirname = (typeof __dirname !== 'undefined' && __dirname) 
+  ? __dirname 
+  : (_filename ? path.dirname(_filename) : process.cwd());
 
 let db: any;
 
 console.log(`Environment: Vercel=${isVercel}, Netlify=${isNetlify}, Render=${isRender}, Production=${isProduction}, NODE_ENV=${process.env.NODE_ENV}`);
 console.log(`Process PID: ${process.pid}`);
 
-const dbPath = (isVercel || isNetlify) ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
+const dbPath = (isVercel || isNetlify) ? path.join("/tmp", "platform.db") : path.join(_dirname, "platform.db");
 
 try {
   db = new DatabaseConstructor(dbPath);
@@ -503,7 +507,7 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // Ensure uploads directory exists
-const uploadDir = isVercel ? path.join("/tmp", "uploads") : path.join(__dirname, "uploads");
+const uploadDir = isVercel ? path.join("/tmp", "uploads") : path.join(_dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -3112,7 +3116,7 @@ const authenticate = (req: any, res: any, next: any) => {
 setupSocket();
 
 // Vite middleware or Static serving
-const distPath = path.join(__dirname, "dist");
+const distPath = path.join(_dirname, "dist");
 console.log(`distPath: ${distPath}`);
 if ((!isProduction && !isVercel && !isNetlify) || (!fs.existsSync(distPath) && !isVercel && !isNetlify)) {
   console.log("Initializing Vite middleware...");
