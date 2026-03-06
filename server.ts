@@ -17,6 +17,7 @@ import fs from "fs";
 
 import nodemailer from "nodemailer";
 import admin from "firebase-admin";
+import serverless from "serverless-http";
 
 console.log("Server.ts is starting...");
 
@@ -54,15 +55,16 @@ const __dirname = path.dirname(__filename);
 
 let db: any;
 const isVercel = !!process.env.VERCEL;
+const isNetlify = !!process.env.NETLIFY;
 const isRender = !!process.env.RENDER;
-const isProduction = process.env.NODE_ENV === "production" || isVercel || isRender;
+const isProduction = process.env.NODE_ENV === "production" || isVercel || isRender || isNetlify;
 
-console.log(`Environment: Vercel=${isVercel}, Render=${isRender}, Production=${isProduction}`);
+console.log(`Environment: Vercel=${isVercel}, Netlify=${isNetlify}, Render=${isRender}, Production=${isProduction}`);
 
 try {
-  const dbPath = isVercel ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
-  // On Render or local, we want SQLite. On Vercel, we mock it.
-  if (Database && !isVercel) {
+  const dbPath = (isVercel || isNetlify) ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
+  // On Render or local, we want SQLite. On Vercel/Netlify, we mock it or use /tmp.
+  if (Database && !isVercel && !isNetlify) {
     db = new Database(dbPath);
     console.log("SQLite initialized at:", dbPath);
   } else {
@@ -3174,10 +3176,11 @@ if (!isProduction && !isVercel) {
 }
 
 const PORT = Number(process.env.PORT) || 3000;
-if (!isVercel) {
+if (!isVercel && !isNetlify) {
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server is live and listening on port ${PORT}`);
   });
 }
 
+export const handler = serverless(app);
 export default app;
