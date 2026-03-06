@@ -1,7 +1,6 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { createServer as createViteServer } from "vite";
 let Database: any;
 // Use dynamic import inside a function to avoid top-level await
 async function getDatabase() {
@@ -3134,14 +3133,16 @@ setupSocket();
 // Vite middleware or Static serving
 if (!isProduction && !isVercel && !isNetlify) {
   console.log("Initializing Vite middleware for development...");
-  createViteServer({
-    server: { middlewareMode: true },
-    appType: "spa",
-  }).then(vite => {
-    app.use(vite.middlewares);
-    console.log("Vite middleware initialized.");
-  }).catch(e => {
-    console.error("Failed to initialize Vite middleware:", e);
+  import("vite").then(({ createServer: createViteServer }) => {
+    createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    }).then(vite => {
+      app.use(vite.middlewares);
+      console.log("Vite middleware initialized.");
+    }).catch(e => {
+      console.error("Failed to initialize Vite middleware:", e);
+    });
   });
 } else {
   // Production mode (Render, etc.) or Vercel
