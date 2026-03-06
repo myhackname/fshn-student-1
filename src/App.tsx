@@ -220,31 +220,6 @@ const LoginPage = ({ apiFetch }: { apiFetch: any }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const apiFetch = async (url: string, options: RequestInit = {}) => {
-    const res = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-        ...options.headers,
-      },
-    });
-
-    const contentType = res.headers.get("content-type");
-    if (contentType && contentType.indexOf("application/json") !== -1) {
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Gabim i serverit: ${res.status}`);
-      return data;
-    } else {
-      const text = await res.text();
-      console.error(`Non-JSON response from ${url}:`, text);
-      if (text.includes("<!DOCTYPE html>")) {
-        throw new Error('Serveri u përgjigj me HTML (ndoshta 404). Sigurohuni që backend-i është duke punuar.');
-      }
-      throw new Error(`Serveri u përgjigj me format të gabuar.`);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -1528,6 +1503,31 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+
+  const apiFetch = async (url: string, options: RequestInit = {}) => {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    });
+
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.indexOf("application/json") !== -1) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Gabim i serverit: ${res.status}`);
+      return data;
+    } else {
+      const text = await res.text();
+      console.error(`Non-JSON response from ${url}:`, text);
+      if (text.includes("<!DOCTYPE html>")) {
+        throw new Error('Serveri u përgjigj me HTML (ndoshta 404). Sigurohuni që backend-i është duke punuar.');
+      }
+      throw new Error(`Serveri u përgjigj me format të gabuar.`);
+    }
+  };
 
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
