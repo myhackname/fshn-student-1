@@ -4,7 +4,6 @@
 
 [functions]
   directory = "functions"
-  external_node_modules = ["better-sqlite3"]
   node_bundler = "esbuild"
 
 [[redirects]]
