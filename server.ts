@@ -3,10 +3,16 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 let Database: any;
-try {
-  Database = (await import("better-sqlite3")).default;
-} catch (e) {
-  console.error("Failed to import better-sqlite3:", e);
+// Use dynamic import inside a function to avoid top-level await
+async function getDatabase() {
+  if (Database) return Database;
+  try {
+    Database = (await import("better-sqlite3")).default;
+    return Database;
+  } catch (e) {
+    console.error("Failed to import better-sqlite3:", e);
+    return null;
+  }
 }
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
@@ -50,26 +56,31 @@ const getFirebaseAdmin = () => {
 const firebaseApp = getFirebaseAdmin();
 const firestore = firebaseApp ? firebaseApp.firestore() : null;
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-let db: any;
 const isVercel = !!process.env.VERCEL;
 const isNetlify = !!process.env.NETLIFY;
 const isRender = !!process.env.RENDER;
 const isProduction = process.env.NODE_ENV === "production" || isVercel || isRender || isNetlify;
+
+const __filename = isProduction ? "" : fileURLToPath(import.meta.url);
+const __dirname = isProduction ? process.cwd() : path.dirname(__filename);
+
+let db: any;
 
 console.log(`Environment: Vercel=${isVercel}, Netlify=${isNetlify}, Render=${isRender}, Production=${isProduction}`);
 
 try {
   const dbPath = (isVercel || isNetlify) ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
   // On Render or local, we want SQLite. On Vercel/Netlify, we mock it or use /tmp.
-  if (Database && !isVercel && !isNetlify) {
-    db = new Database(dbPath);
-    console.log("SQLite initialized at:", dbPath);
-  } else {
-    throw new Error(isVercel ? "SQLite disabled on Vercel" : "Database constructor is missing");
-  }
+  getDatabase().then(DB_CONSTRUCTOR => {
+    if (DB_CONSTRUCTOR && !isVercel && !isNetlify) {
+      db = new DB_CONSTRUCTOR(dbPath);
+      console.log("SQLite initialized at:", dbPath);
+    } else {
+      console.log(isVercel ? "SQLite disabled on Vercel" : "Database constructor is missing");
+    }
+  }).catch(err => {
+    console.error("Database initialization failed:", err);
+  });
 } catch (e) {
   console.error("Database initialization info:", e instanceof Error ? e.message : String(e));
   // Mock DB to prevent crashes
@@ -3121,18 +3132,17 @@ const authenticate = (req: any, res: any, next: any) => {
 setupSocket();
 
 // Vite middleware or Static serving
-if (!isProduction && !isVercel) {
+if (!isProduction && !isVercel && !isNetlify) {
   console.log("Initializing Vite middleware for development...");
-  try {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
+  createViteServer({
+    server: { middlewareMode: true },
+    appType: "spa",
+  }).then(vite => {
     app.use(vite.middlewares);
     console.log("Vite middleware initialized.");
-  } catch (e) {
+  }).catch(e => {
     console.error("Failed to initialize Vite middleware:", e);
-  }
+  });
 } else {
   // Production mode (Render, etc.) or Vercel
   const distPath = path.resolve(__dirname, "dist");
