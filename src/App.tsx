@@ -211,7 +211,7 @@ const Header = () => {
 
 // --- Pages ---
 
-const LoginPage = () => {
+const LoginPage = ({ apiFetch }: { apiFetch: any }) => {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -220,32 +220,44 @@ const LoginPage = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const apiFetch = async (url: string, options: RequestInit = {}) => {
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    });
+
+    const contentType = res.headers.get("content-type");
+    if (contentType && contentType.indexOf("application/json") !== -1) {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Gabim i serverit: ${res.status}`);
+      return data;
+    } else {
+      const text = await res.text();
+      console.error(`Non-JSON response from ${url}:`, text);
+      if (text.includes("<!DOCTYPE html>")) {
+        throw new Error('Serveri u përgjigj me HTML (ndoshta 404). Sigurohuni që backend-i është duke punuar.');
+      }
+      throw new Error(`Serveri u përgjigj me format të gabuar.`);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/login', {
+      const data = await apiFetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        const data = await res.json();
-        if (res.ok) {
-          login(data.token, data.user);
-          navigate('/');
-        } else {
-          setError(data.error || 'Gabim gjatë hyrjes');
-        }
-      } else {
-        const text = await res.text();
-        setError(`Serveri u përgjigj me gabim.`);
-      }
-    } catch (err) {
-      setError('Gabim në lidhje me serverin.');
+      login(data.token, data.user);
+      navigate('/');
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -256,9 +268,8 @@ const LoginPage = () => {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       
-      const res = await fetch('/api/auth/firebase', {
+      const data = await apiFetch('/api/auth/firebase', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           email: user.email, 
           name: user.displayName,
@@ -266,22 +277,16 @@ const LoginPage = () => {
         }),
       });
       
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        const data = await res.json();
-        if (res.ok) {
-          login(data.token, data.user);
-          navigate('/');
-        } else if (res.status === 404) {
-          navigate('/register', { state: { email: user.email, name: user.displayName } });
-        } else {
-          setError(data.error || 'Gabim gjatë hyrjes me Google');
-        }
-      } else {
-        setError('Serveri u përgjigj me një format të gabuar.');
-      }
+      login(data.token, data.user);
+      navigate('/');
     } catch (err: any) {
-      setError('Gabim gjatë hyrjes me Google: ' + err.message);
+      if (err.message.includes('404')) {
+        const user = auth.currentUser;
+        navigate('/register', { state: { email: user?.email, name: user?.displayName } });
+      } else {
+        console.error("Google login error:", err);
+        setError('Gabim gjatë hyrjes me Google: ' + err.message);
+      }
     }
   };
 
@@ -376,7 +381,7 @@ const LoginPage = () => {
   );
 };
 
-const ForgotPasswordPage = () => {
+const ForgotPasswordPage = ({ apiFetch }: { apiFetch: any }) => {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -388,27 +393,13 @@ const ForgotPasswordPage = () => {
     setError('');
     setMessage('');
     try {
-      const res = await fetch('/api/auth/forgot-password', {
+      const data = await apiFetch('/api/auth/forgot-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       });
-      
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        const data = await res.json();
-        if (res.ok) {
-          setMessage(data.message);
-        } else {
-          setError(data.error || 'Gabim gjatë kërkesës');
-        }
-      } else {
-        const text = await res.text();
-        console.error("Non-JSON response from forgot-password:", text);
-        setError('Serveri u përgjigj me një format të gabuar.');
-      }
-    } catch (err) {
-      setError('Gabim në lidhje me serverin');
+      setMessage(data.message);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -462,7 +453,7 @@ const ForgotPasswordPage = () => {
   );
 };
 
-const ResetPasswordPage = () => {
+const ResetPasswordPage = ({ apiFetch }: { apiFetch: any }) => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const token = searchParams.get('token');
@@ -480,28 +471,14 @@ const ResetPasswordPage = () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/reset-password', {
+      const data = await apiFetch('/api/auth/reset-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, newPassword }),
       });
-      
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        const data = await res.json();
-        if (res.ok) {
-          setMessage(data.message);
-          setTimeout(() => navigate('/login'), 3000);
-        } else {
-          setError(data.error || 'Gabim gjatë rivendosjes');
-        }
-      } else {
-        const text = await res.text();
-        console.error("Non-JSON response from reset-password:", text);
-        setError('Serveri u përgjigj me një format të gabuar.');
-      }
-    } catch (err) {
-      setError('Gabim në lidhje me serverin');
+      setMessage(data.message);
+      setTimeout(() => navigate('/login'), 3000);
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -565,7 +542,7 @@ const ResetPasswordPage = () => {
   );
 };
 
-const RegisterPage = () => {
+const RegisterPage = ({ apiFetch }: { apiFetch: any }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [formData, setFormData] = useState({
@@ -599,13 +576,10 @@ const RegisterPage = () => {
         study_type: formData.study_type,
         group_name: formData.group_name
       });
-      const res = await fetch(`/api/auth/check-class-admin?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        setHasAdmin(data.hasAdmin);
-        if (data.hasAdmin) {
-          setFormData(prev => ({ ...prev, is_president: false }));
-        }
+      const data = await apiFetch(`/api/auth/check-class-admin?${params}`);
+      setHasAdmin(data.hasAdmin);
+      if (data.hasAdmin) {
+        setFormData(prev => ({ ...prev, is_president: false }));
       }
     } catch (e) {
       console.error("Error checking admin status:", e);
@@ -626,27 +600,13 @@ const RegisterPage = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch('/api/auth/register', {
+      await apiFetch('/api/auth/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       });
-      
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        if (res.ok) {
-          navigate('/login');
-        } else {
-          const data = await res.json();
-          setError(data.error || 'Gabim gjatë regjistrimit');
-        }
-      } else {
-        const text = await res.text();
-        console.error("Non-JSON response from register:", text);
-        setError('Serveri u përgjigj me një format të gabuar.');
-      }
-    } catch (err) {
-      setError('Gabim në lidhje me serverin');
+      navigate('/login');
+    } catch (err: any) {
+      setError(err.message);
     }
   };
 
@@ -1591,14 +1551,9 @@ export default function App() {
   const refreshUser = async () => {
     if (!token) return;
     try {
-      const res = await fetch('/api/user/me', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const userData = await res.json();
-        setUser(userData);
-        localStorage.setItem('user', JSON.stringify(userData));
-      }
+      const userData = await apiFetch('/api/user/me');
+      setUser(userData);
+      localStorage.setItem('user', JSON.stringify(userData));
     } catch (error) {
       console.error("Error refreshing user:", error);
     }
@@ -1608,10 +1563,10 @@ export default function App() {
     <AuthContext.Provider value={{ user, token, login, logout, refreshUser }}>
       <Router>
         <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/login" element={<LoginPage apiFetch={apiFetch} />} />
+          <Route path="/register" element={<RegisterPage apiFetch={apiFetch} />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage apiFetch={apiFetch} />} />
+          <Route path="/reset-password" element={<ResetPasswordPage apiFetch={apiFetch} />} />
           <Route path="/" element={<Layout><Dashboard /></Layout>} />
           <Route path="/attendance" element={<Layout><Attendance user={user} token={token || ''} /></Layout>} />
           <Route path="/calendar" element={<Layout><Calendar user={user} token={token || ''} /></Layout>} />

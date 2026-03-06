@@ -53,21 +53,31 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let db: any;
+const isVercel = !!process.env.VERCEL;
+const isRender = !!process.env.RENDER;
+const isProduction = process.env.NODE_ENV === "production" || isVercel || isRender;
+
+console.log(`Environment: Vercel=${isVercel}, Render=${isRender}, Production=${isProduction}`);
+
 try {
-  const dbPath = process.env.VERCEL ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
-  if (Database) {
+  const dbPath = isVercel ? path.join("/tmp", "platform.db") : path.join(__dirname, "platform.db");
+  // On Render or local, we want SQLite. On Vercel, we mock it.
+  if (Database && !isVercel) {
     db = new Database(dbPath);
     console.log("SQLite initialized at:", dbPath);
   } else {
-    throw new Error("Database constructor is missing");
+    throw new Error(isVercel ? "SQLite disabled on Vercel" : "Database constructor is missing");
   }
 } catch (e) {
-  console.error("Failed to initialize SQLite (likely due to native binary issues on Vercel):", e);
-  // Mock DB to prevent crashes if Firestore is available as primary
+  console.error("Database initialization info:", e instanceof Error ? e.message : String(e));
+  // Mock DB to prevent crashes
   db = {
-    prepare: () => ({
+    prepare: (sql: string) => ({
       run: () => ({ lastInsertRowid: 0, changes: 0 }),
-      get: () => ({ count: 0 }), // Return an object with count to prevent seeding crashes
+      get: () => {
+        if (sql.toLowerCase().includes("count")) return { count: 0 };
+        return null;
+      },
       all: () => []
     }),
     exec: () => {},
@@ -486,50 +496,56 @@ try {
   console.error("Seeding failed:", e);
 }
 
-async function startServer() {
-  console.log("Starting server initialization...");
-  const app = express();
-  
-  app.use((req, res, next) => {
-    console.log(`[EARLY] ${req.method} ${req.url}`);
-    next();
+const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: { origin: "*" }
+});
+
+app.use((req, res, next) => {
+  console.log(`[EARLY] ${req.method} ${req.url}`);
+  next();
+});
+
+app.use(express.json());
+
+// Ensure uploads directory exists
+const uploadDir = isVercel ? path.join("/tmp", "uploads") : path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Multer configuration
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + "-" + file.originalname);
+  },
+});
+const upload = multer({ storage });
+
+app.use("/uploads", express.static(uploadDir));
+
+app.get("/api/health", (req, res) => {
+  console.log("Health check request received");
+  res.json({ status: "ok", database: db?.name || 'mock' });
+});
+
+// Global Error Handler
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("UNHANDLED ERROR:", err);
+  res.status(500).json({ 
+    error: "Internal Server Error", 
+    message: err.message,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
+});
 
-  app.use(express.json());
-
-  const httpServer = createServer(app);
-
-  // Ensure uploads directory exists
-  const uploadDir = process.env.VERCEL ? path.join("/tmp", "uploads") : path.join(__dirname, "uploads");
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir);
-  }
-
-  // Multer configuration
-  const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-      cb(null, uniqueSuffix + "-" + file.originalname);
-    },
-  });
-  const upload = multer({ storage });
-
-  app.use("/uploads", express.static(uploadDir));
-
-  const io = new Server(httpServer, {
-    cors: { origin: "*" }
-  });
-
-  app.get("/api/health", (req, res) => {
-    console.log("Health check request received");
-    res.json({ status: "ok", database: db.name });
-  });
-
-  // Auth Middleware
-  const authenticate = (req: any, res: any, next: any) => {
+// Auth Middleware
+const authenticate = (req: any, res: any, next: any) => {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) return res.status(401).json({ error: "Pa autorizuar" });
     try {
@@ -2961,7 +2977,8 @@ async function startServer() {
   // Socket.io Logic
   const onlineUsers = new Map();
 
-  io.on("connection", (socket) => {
+  function setupSocket() {
+    io.on("connection", (socket) => {
     socket.on("join", (userData) => {
       // Ensure we have name and surname
       const user = db.prepare("SELECT name, surname FROM users WHERE id = ?").get(userData.id) as any;
@@ -3096,30 +3113,71 @@ async function startServer() {
       io.emit("user_status", Array.from(onlineUsers.values()));
     });
   });
+}
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    console.log("Initializing Vite middleware...");
+// Initialize Socket.io
+setupSocket();
+
+// Vite middleware or Static serving
+if (!isProduction && !isVercel) {
+  console.log("Initializing Vite middleware for development...");
+  try {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
     console.log("Vite middleware initialized.");
+  } catch (e) {
+    console.error("Failed to initialize Vite middleware:", e);
+  }
+} else {
+  // Production mode (Render, etc.) or Vercel
+  const distPath = path.resolve(__dirname, "dist");
+  console.log("Checking for static files at:", distPath);
+  
+  if (fs.existsSync(distPath)) {
+    console.log("Static files found. Registering static middleware.");
+    app.use(express.static(distPath));
   } else {
-    app.use(express.static(path.join(__dirname, "dist")));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
-    });
+    console.warn("CRITICAL WARNING: 'dist' directory not found at:", distPath);
+    console.warn("The frontend will not be served. Did you run 'npm run build'?");
   }
 
-  const PORT = 3000;
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  // Always register the catch-all route in production/Vercel
+  app.get("*", (req, res) => {
+    // API routes should have been handled by now
+    if (req.url.startsWith('/api')) {
+      console.log(`[API 404] ${req.method} ${req.url}`);
+      return res.status(404).json({ error: `Rruga API nuk u gjet: ${req.method} ${req.url}` });
+    }
+
+    // Serve index.html for all other routes
+    const indexPath = path.join(distPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).send(`
+        <html>
+          <body style="font-family: sans-serif; padding: 2rem; line-height: 1.5;">
+            <h1>Frontend Not Found</h1>
+            <p>The server is running, but the frontend files (dist) are missing.</p>
+            <p><b>Path checked:</b> ${indexPath}</p>
+            <p>Please ensure you have run <code>npm run build</code> before starting the server.</p>
+            <hr>
+            <p>API Health Check: <a href="/api/health">/api/health</a></p>
+          </body>
+        </html>
+      `);
+    }
   });
 }
 
-startServer().catch(err => {
-  console.error("FATAL ERROR starting server:", err);
-  process.exit(1);
-});
+const PORT = Number(process.env.PORT) || 3000;
+if (!isVercel) {
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server is live and listening on port ${PORT}`);
+  });
+}
+
+export default app;

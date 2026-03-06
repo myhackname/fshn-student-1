@@ -53,8 +53,14 @@ export default function Chat({ user, token }: { user: any, token: string }) {
       const res = await fetch('/api/class/members', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await res.json();
-      setClassMembers(Array.isArray(data) ? data : []);
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+        const data = await res.json();
+        setClassMembers(Array.isArray(data) ? data : []);
+      } else {
+        console.error("Non-JSON response from class members");
+        setClassMembers([]);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -65,8 +71,14 @@ export default function Chat({ user, token }: { user: any, token: string }) {
       const res = await fetch(`/api/chat/messages?type=${chatType}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      const data = await res.json();
-      setMessages(Array.isArray(data) ? data : []);
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+        const data = await res.json();
+        setMessages(Array.isArray(data) ? data : []);
+      } else {
+        console.error("Non-JSON response from chat messages");
+        setMessages([]);
+      }
     } catch (e) { 
       console.error(e);
       setMessages([]);

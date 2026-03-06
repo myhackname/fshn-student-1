@@ -1,40 +1,25 @@
 {
   "version": 2,
-  "builds": [
+  "functions": {
+    "server.ts": {
+      "runtime": "@vercel/node@20.x",
+      "memory": 1024
+    }
+  },
+  "rewrites": [
     {
-      "src": "server.ts",
-      "use": "@vercel/node"
+      "source": "/api/(.*)",
+      "destination": "/server.ts"
     },
     {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "dist" }
+      "source": "/socket.io/(.*)",
+      "destination": "/server.ts"
+    },
+    {
+      "source": "/uploads/(.*)",
+      "destination": "/server.ts"
     }
   ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "server.ts"
-    },
-    {
-      "src": "/socket.io/(.*)",
-      "dest": "server.ts"
-    },
-    {
-      "src": "/uploads/(.*)",
-      "dest": "server.ts"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/$1",
-      "continue": true
-    },
-    {
-      "handle": "filesystem"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
-  ]
+  "cleanUrls": true,
+  "trailingSlash": false
 }
