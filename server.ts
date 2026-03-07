@@ -10,8 +10,9 @@ import multer from "multer";
 import fs from "fs";
 import nodemailer from "nodemailer";
 import admin from "firebase-admin";
-import serverless from "serverless-http";
 import cors from "cors";
+
+const JWT_SECRET = process.env.JWT_SECRET || 'fshn-secret-key';
 
 console.log("Server.ts is starting...");
 
@@ -492,6 +493,10 @@ try {
 } catch (e) {
   console.error("Seeding failed:", e);
 }
+};
+
+// Initialize Database before starting the server
+await initDb();
 
 const app = express();
 const httpServer = createServer(app);
@@ -3214,5 +3219,4 @@ if (!isNetlify && !isVercel) {
   });
 }
 
-const handler = serverless(app);
 export default app;

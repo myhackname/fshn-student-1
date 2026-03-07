@@ -4,6 +4,9 @@ publish = "dist"
 
 [functions]
 directory = "functions"
+node_bundler = "esbuild"
+format = "esm"
+external_node_modules = ["better-sqlite3"]
 
 [[redirects]]
 from = "/api/*"
