@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import DatabaseConstructor from "better-sqlite3";
+// import DatabaseConstructor from "better-sqlite3";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import path from "path";
@@ -58,30 +58,32 @@ const _dirname = (typeof __dirname !== 'undefined' && __dirname)
 
 let db: any;
 
-console.log(`Environment: Vercel=${isVercel}, Netlify=${isNetlify}, Render=${isRender}, Production=${isProduction}, NODE_ENV=${process.env.NODE_ENV}`);
-console.log(`Process PID: ${process.pid}`);
+const initDb = async () => {
+  const dbPath = (isVercel || isNetlify) ? path.join("/tmp", "platform.db") : path.join(_dirname, "platform.db");
+  
+  try {
+    // In serverless environments, better-sqlite3 might fail to load due to native bindings
+    const { default: DatabaseConstructor } = await import("better-sqlite3");
+    db = new DatabaseConstructor(dbPath);
+    console.log("SQLite initialized at:", dbPath);
+  } catch (e) {
+    console.error("Database initialization failed, using mock:", e);
+    db = {
+      prepare: (sql: string) => ({
+        run: () => ({ lastInsertRowid: 0, changes: 0 }),
+        get: () => {
+          if (sql.toLowerCase().includes("count")) return { count: 0 };
+          return null;
+        },
+        all: () => []
+      }),
+      exec: () => {},
+      transaction: (cb: any) => cb()
+    };
+  }
+};
 
-const dbPath = (isVercel || isNetlify) ? path.join("/tmp", "platform.db") : path.join(_dirname, "platform.db");
-
-try {
-  db = new DatabaseConstructor(dbPath);
-  console.log("SQLite initialized at:", dbPath);
-} catch (e) {
-  console.error("Database initialization failed, using mock:", e);
-  // Mock DB to prevent crashes
-  db = {
-    prepare: (sql: string) => ({
-      run: () => ({ lastInsertRowid: 0, changes: 0 }),
-      get: () => {
-        if (sql.toLowerCase().includes("count")) return { count: 0 };
-        return null;
-      },
-      all: () => []
-    }),
-    exec: () => {},
-    transaction: (cb: any) => cb()
-  };
-}
+await initDb();
 const JWT_SECRET = process.env.JWT_SECRET || "fshn-secret-key-2026";
 
 // Initialize Database
@@ -504,12 +506,15 @@ app.use(cors());
 app.use((req, res, next) => {
   // Netlify Functions path handling
   if (isNetlify) {
-    // If we are in a Netlify function, we want to ensure the URL starts with /api
-    // so it matches our Express routes.
+    // Log the incoming request for debugging in Netlify logs
+    console.log(`[NETLIFY REQ] ${req.method} ${req.url} (Path: ${req.path})`);
+    
+    // Ensure the URL starts with /api for matching Express routes
     if (!req.url.startsWith('/api') && !req.url.startsWith('/.netlify')) {
       const isStaticFile = req.url.split('?')[0].split('/').pop()?.includes('.');
       if (!isStaticFile) {
         req.url = '/api' + (req.url.startsWith('/') ? '' : '/') + req.url;
+        console.log(`[NETLIFY PATH REWRITE] New URL: ${req.url}`);
       }
     }
   }

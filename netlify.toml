@@ -9,6 +9,7 @@ directory = "functions"
 from = "/api/*"
 to = "/.netlify/functions/server"
 status = 200
+force = true
 
 [[redirects]]
 from = "/*"
