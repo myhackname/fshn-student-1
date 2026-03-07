@@ -11,6 +11,7 @@ import fs from "fs";
 import nodemailer from "nodemailer";
 import admin from "firebase-admin";
 import serverless from "serverless-http";
+import cors from "cors";
 
 console.log("Server.ts is starting...");
 
@@ -499,14 +500,17 @@ const io = new Server(httpServer, {
   cors: { origin: "*" }
 });
 
+app.use(cors());
 app.use((req, res, next) => {
   if (isNetlify) {
-    console.log(`[NETLIFY DEBUG] Method: ${req.method}, URL: ${req.url}, OriginalUrl: ${req.originalUrl}`);
+    console.log(`[NETLIFY DEBUG] Method: ${req.method}, URL: ${req.url}, OriginalUrl: ${req.originalUrl}, Path: ${req.path}`);
   }
   
   // Netlify Functions might strip the /api prefix depending on the redirect
   // If we are in Netlify and the URL doesn't start with /api but we know it's an API call
-  if (isNetlify && !req.url.startsWith('/api') && !req.url.startsWith('/.netlify')) {
+  // We check if it's NOT a static file (no dot in last segment) and not starting with /api
+  const isStaticFile = req.url.split('?')[0].split('/').pop()?.includes('.');
+  if (isNetlify && !req.url.startsWith('/api') && !req.url.startsWith('/.netlify') && !isStaticFile) {
     const originalUrl = req.url;
     req.url = '/api' + (originalUrl.startsWith('/') ? '' : '/') + originalUrl;
     console.log(`[NETLIFY PATH FIX] ${originalUrl} -> ${req.url}`);
@@ -3153,6 +3157,16 @@ if ((!isProduction && !isVercel && !isNetlify) || (!fs.existsSync(distPath) && !
     console.warn("CRITICAL WARNING: 'dist' directory not found at:", distPath);
     console.warn("The frontend will not be served. Did you run 'npm run build'?");
   }
+
+  // Catch-all for API routes to ensure JSON response
+  app.all("/api/*", (req, res) => {
+    console.log(`[API 404] ${req.method} ${req.url}`);
+    res.status(404).json({ 
+      error: "Rruga API nuk u gjet", 
+      method: req.method, 
+      url: req.url 
+    });
+  });
 
   // Always register the catch-all route in production/Vercel
   app.get("*", (req, res) => {
