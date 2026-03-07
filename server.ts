@@ -58,7 +58,8 @@ const _dirname = (typeof __dirname !== 'undefined' && __dirname)
 
 let db: any;
 
-const initDb = async () => {
+export const initDb = async () => {
+  if (db) return db;
   const dbPath = (isVercel || isNetlify) ? path.join("/tmp", "platform.db") : path.join(_dirname, "platform.db");
   
   try {
@@ -81,14 +82,10 @@ const initDb = async () => {
       transaction: (cb: any) => cb()
     };
   }
-};
 
-await initDb();
-const JWT_SECRET = process.env.JWT_SECRET || "fshn-secret-key-2026";
-
-// Initialize Database
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
+  // Initialize Database
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     surname TEXT,
