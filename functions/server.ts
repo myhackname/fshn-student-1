@@ -4,4 +4,5 @@ import app from "../server";
 // Ensure we are in a serverless context
 process.env.NETLIFY = "true";
 
-export const handler = serverless(app);
+// functions/server.ts
+exports.handler = serverless(app);

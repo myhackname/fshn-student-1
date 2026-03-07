@@ -3214,5 +3214,5 @@ if (!isNetlify && !isVercel) {
   });
 }
 
-export const handler = serverless(app);
+const handler = serverless(app);
 export default app;
