@@ -3120,7 +3120,8 @@ const distPath = path.join(_dirname, "dist");
 console.log(`distPath: ${distPath}`);
 if ((!isProduction && !isVercel && !isNetlify) || (!fs.existsSync(distPath) && !isVercel && !isNetlify)) {
   console.log("Initializing Vite middleware...");
-  import("vite").then(({ createServer: createViteServer }) => {
+  import(String("vite")).then((mod: any) => {
+    const createViteServer = mod.createServer;
     createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
