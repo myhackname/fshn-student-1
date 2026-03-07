@@ -44,7 +44,7 @@ const firebaseApp = getFirebaseAdmin();
 const firestore = firebaseApp ? firebaseApp.firestore() : null;
 
 const isVercel = !!process.env.VERCEL;
-const isNetlify = !!process.env.NETLIFY;
+const isNetlify = !!process.env.NETLIFY || !!process.env.CONTEXT || !!process.env.DEPLOY_PRIME_URL;
 const isRender = !!process.env.RENDER;
 const isProduction = process.env.NODE_ENV === "production" || isVercel || isRender || isNetlify;
 
@@ -500,7 +500,17 @@ const io = new Server(httpServer, {
 });
 
 app.use((req, res, next) => {
-  console.log(`[EARLY] ${req.method} ${req.url}`);
+  if (isNetlify) {
+    console.log(`[NETLIFY DEBUG] Method: ${req.method}, URL: ${req.url}, OriginalUrl: ${req.originalUrl}`);
+  }
+  
+  // Netlify Functions might strip the /api prefix depending on the redirect
+  // If we are in Netlify and the URL doesn't start with /api but we know it's an API call
+  if (isNetlify && !req.url.startsWith('/api') && !req.url.startsWith('/.netlify')) {
+    const originalUrl = req.url;
+    req.url = '/api' + (originalUrl.startsWith('/') ? '' : '/') + originalUrl;
+    console.log(`[NETLIFY PATH FIX] ${originalUrl} -> ${req.url}`);
+  }
   next();
 });
 
