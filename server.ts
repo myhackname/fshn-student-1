@@ -502,18 +502,10 @@ const io = new Server(httpServer, {
 
 app.use(cors());
 app.use((req, res, next) => {
-  if (isNetlify) {
-    console.log(`[NETLIFY DEBUG] Method: ${req.method}, URL: ${req.url}, OriginalUrl: ${req.originalUrl}, Path: ${req.path}`);
-  }
-  
   // Netlify Functions might strip the /api prefix depending on the redirect
-  // If we are in Netlify and the URL doesn't start with /api but we know it's an API call
-  // We check if it's NOT a static file (no dot in last segment) and not starting with /api
   const isStaticFile = req.url.split('?')[0].split('/').pop()?.includes('.');
   if (isNetlify && !req.url.startsWith('/api') && !req.url.startsWith('/.netlify') && !isStaticFile) {
-    const originalUrl = req.url;
-    req.url = '/api' + (originalUrl.startsWith('/') ? '' : '/') + originalUrl;
-    console.log(`[NETLIFY PATH FIX] ${originalUrl} -> ${req.url}`);
+    req.url = '/api' + (req.url.startsWith('/') ? '' : '/') + req.url;
   }
   next();
 });
