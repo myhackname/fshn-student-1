@@ -502,10 +502,16 @@ const io = new Server(httpServer, {
 
 app.use(cors());
 app.use((req, res, next) => {
-  // Netlify Functions might strip the /api prefix depending on the redirect
-  const isStaticFile = req.url.split('?')[0].split('/').pop()?.includes('.');
-  if (isNetlify && !req.url.startsWith('/api') && !req.url.startsWith('/.netlify') && !isStaticFile) {
-    req.url = '/api' + (req.url.startsWith('/') ? '' : '/') + req.url;
+  // Netlify Functions path handling
+  if (isNetlify) {
+    // If we are in a Netlify function, we want to ensure the URL starts with /api
+    // so it matches our Express routes.
+    if (!req.url.startsWith('/api') && !req.url.startsWith('/.netlify')) {
+      const isStaticFile = req.url.split('?')[0].split('/').pop()?.includes('.');
+      if (!isStaticFile) {
+        req.url = '/api' + (req.url.startsWith('/') ? '' : '/') + req.url;
+      }
+    }
   }
   next();
 });
@@ -3152,11 +3158,12 @@ if ((!isProduction && !isVercel && !isNetlify) || (!fs.existsSync(distPath) && !
 
   // Catch-all for API routes to ensure JSON response
   app.all("/api/*", (req, res) => {
-    console.log(`[API 404] ${req.method} ${req.url}`);
     res.status(404).json({ 
-      error: "Rruga API nuk u gjet", 
+      error: "Rruga API nuk u gjet (404)", 
       method: req.method, 
-      url: req.url 
+      url: req.url,
+      path: req.path,
+      env: isNetlify ? 'Netlify' : 'Other'
     });
   });
 
@@ -3192,10 +3199,18 @@ if ((!isProduction && !isVercel && !isNetlify) || (!fs.existsSync(distPath) && !
 const PORT = Number(process.env.PORT) || 3000;
 console.log(`Attempting to listen on port ${PORT}...`);
 console.log("Starting httpServer.listen...");
-// Always listen in AI Studio environment
-httpServer.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server is live and listening on port ${PORT}`);
-});
+// Always listen in AI Studio environment, but avoid blocking in serverless functions
+if (!isNetlify && !isVercel) {
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server is live and listening on port ${PORT}`);
+  });
+} else if (process.env.AI_STUDIO) {
+  // Special case for AI Studio if it sets an env var, 
+  // but usually we just check if it's NOT Netlify/Vercel
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server is live and listening on port ${PORT} (AI Studio)`);
+  });
+}
 
 export const handler = serverless(app);
 export default app;
