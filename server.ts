@@ -5,7 +5,6 @@ import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import path from "path";
-import { fileURLToPath } from "url";
 import multer from "multer";
 import fs from "fs";
 import nodemailer from "nodemailer";
@@ -50,12 +49,7 @@ const isNetlify = !!process.env.NETLIFY || !!process.env.CONTEXT || !!process.en
 const isRender = !!process.env.RENDER;
 const isProduction = process.env.NODE_ENV === "production" || isVercel || isRender || isNetlify;
 
-const _filename = (typeof import.meta !== 'undefined' && import.meta.url) 
-  ? fileURLToPath(import.meta.url) 
-  : (typeof __filename !== 'undefined' ? __filename : '');
-const _dirname = (typeof __dirname !== 'undefined' && __dirname) 
-  ? __dirname 
-  : (_filename ? path.dirname(_filename) : process.cwd());
+const _dirname = process.cwd();
 
 let db: any;
 
@@ -496,12 +490,23 @@ try {
 };
 
 // Initialize Database before starting the server
-await initDb();
+// Removed top-level await for Netlify compatibility
+// await initDb();
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: "*" }
+});
+
+app.use(async (req, res, next) => {
+  try {
+    await initDb();
+    next();
+  } catch (err) {
+    console.error("Failed to initialize database in middleware:", err);
+    res.status(500).json({ error: "Database initialization failed" });
+  }
 });
 
 app.use(cors());
@@ -3208,14 +3213,22 @@ console.log(`Attempting to listen on port ${PORT}...`);
 console.log("Starting httpServer.listen...");
 // Always listen in AI Studio environment, but avoid blocking in serverless functions
 if (!isNetlify && !isVercel) {
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server is live and listening on port ${PORT}`);
+  initDb().then(() => {
+    httpServer.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server is live and listening on port ${PORT}`);
+    });
+  }).catch(e => {
+    console.error("Failed to start server due to DB error:", e);
   });
 } else if (process.env.AI_STUDIO) {
   // Special case for AI Studio if it sets an env var, 
   // but usually we just check if it's NOT Netlify/Vercel
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server is live and listening on port ${PORT} (AI Studio)`);
+  initDb().then(() => {
+    httpServer.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server is live and listening on port ${PORT} (AI Studio)`);
+    });
+  }).catch(e => {
+    console.error("Failed to start server (AI Studio) due to DB error:", e);
   });
 }
 
