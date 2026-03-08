@@ -44,10 +44,10 @@ const getFirebaseAdmin = () => {
 const firebaseApp = getFirebaseAdmin();
 const firestore = firebaseApp ? firebaseApp.firestore() : null;
 
-const isVercel = !!process.env.VERCEL;
-const isNetlify = !!process.env.NETLIFY || !!process.env.CONTEXT || !!process.env.DEPLOY_PRIME_URL;
-const isRender = !!process.env.RENDER;
-const isProduction = process.env.NODE_ENV === "production" || isVercel || isRender || isNetlify;
+const getIsNetlify = () => !!process.env.NETLIFY || !!process.env.CONTEXT || !!process.env.DEPLOY_PRIME_URL || process.env.NODE_ENV === 'production';
+const getIsVercel = () => !!process.env.VERCEL;
+const getIsRender = () => !!process.env.RENDER;
+const getIsProduction = () => process.env.NODE_ENV === "production" || getIsVercel() || getIsRender() || getIsNetlify();
 
 const _dirname = process.cwd();
 
@@ -55,7 +55,9 @@ let db: any;
 
 export const initDb = async () => {
   if (db) return db;
-  const dbPath = (isVercel || isNetlify) ? path.join("/tmp", "platform.db") : path.join(_dirname, "platform.db");
+  const isNetlifyEnv = getIsNetlify();
+  const isVercelEnv = getIsVercel();
+  const dbPath = (isVercelEnv || isNetlifyEnv) ? path.join("/tmp", "platform.db") : path.join(_dirname, "platform.db");
   
   try {
     // In serverless environments, better-sqlite3 might fail to load due to native bindings
@@ -499,6 +501,11 @@ const io = new Server(httpServer, {
   cors: { origin: "*" }
 });
 
+app.use((req, res, next) => {
+  console.log(`[SERVER LOG] ${req.method} ${req.url}`);
+  next();
+});
+
 app.use(async (req, res, next) => {
   try {
     await initDb();
@@ -512,7 +519,8 @@ app.use(async (req, res, next) => {
 app.use(cors());
 app.use((req, res, next) => {
   // Netlify Functions path handling
-  if (isNetlify) {
+  const isNetlifyEnv = getIsNetlify();
+  if (isNetlifyEnv) {
     // Log the incoming request for debugging in Netlify logs
     console.log(`[NETLIFY REQ] ${req.method} ${req.url} (Path: ${req.path})`);
     
@@ -520,8 +528,9 @@ app.use((req, res, next) => {
     if (!req.url.startsWith('/api') && !req.url.startsWith('/.netlify')) {
       const isStaticFile = req.url.split('?')[0].split('/').pop()?.includes('.');
       if (!isStaticFile) {
+        const oldUrl = req.url;
         req.url = '/api' + (req.url.startsWith('/') ? '' : '/') + req.url;
-        console.log(`[NETLIFY PATH REWRITE] New URL: ${req.url}`);
+        console.log(`[NETLIFY PATH REWRITE] ${oldUrl} -> ${req.url}`);
       }
     }
   }
@@ -531,7 +540,7 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 // Ensure uploads directory exists
-const uploadDir = isVercel ? path.join("/tmp", "uploads") : path.join(_dirname, "uploads");
+const uploadDir = getIsVercel() ? path.join("/tmp", "uploads") : path.join(_dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -3142,7 +3151,7 @@ setupSocket();
 // Vite middleware or Static serving
 const distPath = path.join(_dirname, "dist");
 console.log(`distPath: ${distPath}`);
-if ((!isProduction && !isVercel && !isNetlify) || (!fs.existsSync(distPath) && !isVercel && !isNetlify)) {
+if ((!getIsProduction() && !getIsVercel() && !getIsNetlify()) || (!fs.existsSync(distPath) && !getIsVercel() && !getIsNetlify())) {
   console.log("Initializing Vite middleware...");
   import(String("vite")).then((mod: any) => {
     const createViteServer = mod.createServer;
@@ -3175,7 +3184,7 @@ if ((!isProduction && !isVercel && !isNetlify) || (!fs.existsSync(distPath) && !
       method: req.method, 
       url: req.url,
       path: req.path,
-      env: isNetlify ? 'Netlify' : 'Other'
+      env: getIsNetlify() ? 'Netlify' : 'Other'
     });
   });
 
@@ -3212,7 +3221,7 @@ const PORT = Number(process.env.PORT) || 3000;
 console.log(`Attempting to listen on port ${PORT}...`);
 console.log("Starting httpServer.listen...");
 // Always listen in AI Studio environment, but avoid blocking in serverless functions
-if (!isNetlify && !isVercel) {
+if (!getIsNetlify() && !getIsVercel()) {
   initDb().then(() => {
     httpServer.listen(PORT, "0.0.0.0", () => {
       console.log(`Server is live and listening on port ${PORT}`);
