@@ -44,10 +44,22 @@ const getFirebaseAdmin = () => {
 const firebaseApp = getFirebaseAdmin();
 const firestore = firebaseApp ? firebaseApp.firestore() : null;
 
-const getIsNetlify = () => !!process.env.NETLIFY || !!process.env.CONTEXT || !!process.env.DEPLOY_PRIME_URL;
+const getIsNetlify = () => {
+  const res = !!process.env.NETLIFY || !!process.env.CONTEXT || !!process.env.DEPLOY_PRIME_URL;
+  return res;
+};
 const getIsVercel = () => !!process.env.VERCEL;
 const getIsRender = () => !!process.env.RENDER;
 const getIsProduction = () => process.env.NODE_ENV === "production" || getIsVercel() || getIsRender() || getIsNetlify();
+
+console.log("Environment Check:", {
+  NODE_ENV: process.env.NODE_ENV,
+  isProduction: getIsProduction(),
+  isNetlify: getIsNetlify(),
+  isVercel: getIsVercel(),
+  isRender: getIsRender(),
+  cwd: process.cwd()
+});
 
 const _dirname = process.cwd();
 
@@ -63,7 +75,7 @@ export const initDb = async () => {
     // In serverless environments, better-sqlite3 might fail to load due to native bindings
     const { default: DatabaseConstructor } = await import("better-sqlite3");
     db = new DatabaseConstructor(dbPath);
-    console.log("SQLite initialized at:", dbPath);
+    console.log("SQLite initialized successfully at:", dbPath);
   } catch (e) {
     console.error("Database initialization failed, using mock:", e);
     db = {
@@ -502,7 +514,8 @@ const io = new Server(httpServer, {
 });
 
 app.use((req, res, next) => {
-  console.log(`[SERVER LOG] ${req.method} ${req.url}`);
+  console.log(`[DEBUG] Incoming Request: ${req.method} ${req.url}`);
+  console.log(`[DEBUG] Headers: ${JSON.stringify(req.headers)}`);
   next();
 });
 
@@ -521,6 +534,7 @@ app.use((req, res, next) => {
   // Netlify Functions path handling
   const isNetlifyEnv = getIsNetlify();
   if (isNetlifyEnv) {
+    console.log(`[NETLIFY DEBUG] Processing request: ${req.method} ${req.url}`);
     // Log the incoming request for debugging in Netlify logs
     console.log(`[NETLIFY REQ] ${req.method} ${req.url} (Path: ${req.path})`);
     
@@ -562,16 +576,6 @@ app.use("/uploads", express.static(uploadDir));
 app.get("/api/health", (req, res) => {
   console.log("Health check request received");
   res.json({ status: "ok", database: db?.name || 'mock' });
-});
-
-// Global Error Handler
-app.use((err: any, req: any, res: any, next: any) => {
-  console.error("UNHANDLED ERROR:", err);
-  res.status(500).json({ 
-    error: "Internal Server Error", 
-    message: err.message,
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-  });
 });
 
 // Auth Middleware
@@ -2990,11 +2994,15 @@ const authenticate = (req: any, res: any, next: any) => {
 
   // Global error handler (should be after routes)
   app.use((err: any, req: any, res: any, next: any) => {
-    console.error("GLOBAL ERROR:", err);
+    console.error("GLOBAL ERROR HANDLER:", err);
     if (res.headersSent) {
       return next(err);
     }
-    res.status(500).json({ error: "Gabim i brendshëm i serverit: " + err.message });
+    res.status(500).json({ 
+      error: "Gabim i brendshëm i serverit", 
+      message: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   });
 
   app.use((req, res, next) => {
@@ -3168,7 +3176,6 @@ if ((!getIsProduction() && !getIsVercel() && !getIsNetlify()) || (!fs.existsSync
 } else {
   // Production mode (Render, etc.) or Vercel
   console.log("Checking for static files at:", distPath);
-  
   if (fs.existsSync(distPath)) {
     console.log("Static files found. Registering static middleware.");
     app.use(express.static(distPath));
@@ -3176,46 +3183,48 @@ if ((!getIsProduction() && !getIsVercel() && !getIsNetlify()) || (!fs.existsSync
     console.warn("CRITICAL WARNING: 'dist' directory not found at:", distPath);
     console.warn("The frontend will not be served. Did you run 'npm run build'?");
   }
-
-  // Catch-all for API routes to ensure JSON response
-  app.all("/api/*", (req, res) => {
-    res.status(404).json({ 
-      error: "Rruga API nuk u gjet (404)", 
-      method: req.method, 
-      url: req.url,
-      path: req.path,
-      env: getIsNetlify() ? 'Netlify' : 'Other'
-    });
-  });
-
-  // Always register the catch-all route in production/Vercel
-  app.get("*", (req, res) => {
-    // API routes should have been handled by now
-    if (req.url.startsWith('/api')) {
-      console.log(`[API 404] ${req.method} ${req.url}`);
-      return res.status(404).json({ error: `Rruga API nuk u gjet: ${req.method} ${req.url}` });
-    }
-
-    // Serve index.html for all other routes
-    const indexPath = path.join(distPath, "index.html");
-    if (fs.existsSync(indexPath)) {
-      res.sendFile(indexPath);
-    } else {
-      res.status(404).send(`
-        <html>
-          <body style="font-family: sans-serif; padding: 2rem; line-height: 1.5;">
-            <h1>Frontend Not Found</h1>
-            <p>The server is running, but the frontend files (dist) are missing.</p>
-            <p><b>Path checked:</b> ${indexPath}</p>
-            <p>Please ensure you have run <code>npm run build</code> before starting the server.</p>
-            <hr>
-            <p>API Health Check: <a href="/api/health">/api/health</a></p>
-          </body>
-        </html>
-      `);
-    }
-  });
 }
+
+// Catch-all for API routes to ensure JSON response
+app.all("/api/*", (req, res) => {
+  console.log(`[DEBUG] API 404 hit: ${req.method} ${req.url}`);
+  res.status(404).json({ 
+    error: "Rruga API nuk u gjet (404)", 
+    method: req.method, 
+    url: req.url,
+    path: req.path,
+    env: getIsNetlify() ? 'Netlify' : 'Other'
+  });
+});
+
+// Always register the catch-all route in production/Vercel
+app.get("*", (req, res) => {
+  console.log(`[DEBUG] Catch-all route hit: ${req.method} ${req.url}`);
+  // API routes should have been handled by now
+  if (req.url.startsWith('/api')) {
+    console.log(`[API 404] ${req.method} ${req.url}`);
+    return res.status(404).json({ error: `Rruga API nuk u gjet: ${req.method} ${req.url}` });
+  }
+
+  // Serve index.html for all other routes
+  const indexPath = path.join(distPath, "index.html");
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).send(`
+      <html>
+        <body style="font-family: sans-serif; padding: 2rem; line-height: 1.5;">
+          <h1>Frontend Not Found</h1>
+          <p>The server is running, but the frontend files (dist) are missing.</p>
+          <p><b>Path checked:</b> ${indexPath}</p>
+          <p>Please ensure you have run <code>npm run build</code> before starting the server.</p>
+          <hr>
+          <p>API Health Check: <a href="/api/health">/api/health</a></p>
+        </body>
+      </html>
+    `);
+  }
+});
 
 const PORT = Number(process.env.PORT) || 3000;
 console.log(`Attempting to listen on port ${PORT}...`);
