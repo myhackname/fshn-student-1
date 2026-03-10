@@ -45,8 +45,8 @@ const firebaseApp = getFirebaseAdmin();
 const firestore = firebaseApp ? firebaseApp.firestore() : null;
 
 const getIsNetlify = () => {
-  const res = !!process.env.NETLIFY || !!process.env.CONTEXT || !!process.env.DEPLOY_PRIME_URL;
-  return res;
+  // Only true if explicitly set and NOT in AI Studio
+  return !!process.env.NETLIFY && !process.env.AI_STUDIO;
 };
 const getIsVercel = () => !!process.env.VERCEL;
 const getIsRender = () => !!process.env.RENDER;
@@ -530,27 +530,6 @@ app.use(async (req, res, next) => {
 });
 
 app.use(cors());
-app.use((req, res, next) => {
-  // Netlify Functions path handling
-  const isNetlifyEnv = getIsNetlify();
-  if (isNetlifyEnv) {
-    console.log(`[NETLIFY DEBUG] Processing request: ${req.method} ${req.url}`);
-    // Log the incoming request for debugging in Netlify logs
-    console.log(`[NETLIFY REQ] ${req.method} ${req.url} (Path: ${req.path})`);
-    
-    // Ensure the URL starts with /api for matching Express routes
-    if (!req.url.startsWith('/api') && !req.url.startsWith('/.netlify')) {
-      const isStaticFile = req.url.split('?')[0].split('/').pop()?.includes('.');
-      if (!isStaticFile) {
-        const oldUrl = req.url;
-        req.url = '/api' + (req.url.startsWith('/') ? '' : '/') + req.url;
-        console.log(`[NETLIFY PATH REWRITE] ${oldUrl} -> ${req.url}`);
-      }
-    }
-  }
-  next();
-});
-
 app.use(express.json());
 
 // Ensure uploads directory exists
@@ -2986,32 +2965,6 @@ const authenticate = (req: any, res: any, next: any) => {
     res.json({ success: true });
   });
 
-  // API 404 Handler
-  app.all("/api/*", (req, res) => {
-    console.log(`[API 404] ${req.method} ${req.url}`);
-    res.status(404).json({ error: `Rruga API nuk u gjet: ${req.method} ${req.url}` });
-  });
-
-  // Global error handler (should be after routes)
-  app.use((err: any, req: any, res: any, next: any) => {
-    console.error("GLOBAL ERROR HANDLER:", err);
-    if (res.headersSent) {
-      return next(err);
-    }
-    res.status(500).json({ 
-      error: "Gabim i brendshëm i serverit", 
-      message: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
-  });
-
-  app.use((req, res, next) => {
-    if (req.url.startsWith('/api')) {
-      console.log(`[API FALLTHROUGH] ${req.method} ${req.url}`);
-    }
-    next();
-  });
-
   // Socket.io Logic
   const onlineUsers = new Map();
 
@@ -3156,98 +3109,92 @@ const authenticate = (req: any, res: any, next: any) => {
 // Initialize Socket.io
 setupSocket();
 
-// Vite middleware or Static serving
+// --- Frontend Setup ---
 const distPath = path.join(_dirname, "dist");
-console.log(`distPath: ${distPath}`);
-if ((!getIsProduction() && !getIsVercel() && !getIsNetlify()) || (!fs.existsSync(distPath) && !getIsVercel() && !getIsNetlify())) {
-  console.log("Initializing Vite middleware...");
-  import(String("vite")).then((mod: any) => {
-    const createViteServer = mod.createServer;
-    createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    }).then(vite => {
+
+async function startApp() {
+  // 1. API Catch-all (for any /api/* routes that didn't match)
+  app.all("/api/*", (req, res) => {
+    console.log(`[API 404] ${req.method} ${req.url}`);
+    res.status(404).json({ 
+      error: "Rruga API nuk u gjet (404)", 
+      method: req.method, 
+      url: req.url 
+    });
+  });
+
+  // 2. Global Error Handler
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("GLOBAL ERROR HANDLER:", err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    res.status(500).json({ 
+      error: "Gabim i brendshëm i serverit", 
+      message: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  });
+
+  // 3. Static Files or Vite Middleware
+  if (!getIsProduction() && !getIsVercel() && !getIsNetlify()) {
+    console.log("Initializing Vite middleware...");
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
       app.use(vite.middlewares);
       console.log("Vite middleware initialized.");
-    }).catch(e => {
+    } catch (e) {
       console.error("Failed to initialize Vite middleware:", e);
-    });
-  });
-} else {
-  // Production mode (Render, etc.) or Vercel
-  console.log("Checking for static files at:", distPath);
-  if (fs.existsSync(distPath)) {
-    console.log("Static files found. Registering static middleware.");
-    app.use(express.static(distPath));
+    }
   } else {
-    console.warn("CRITICAL WARNING: 'dist' directory not found at:", distPath);
-    console.warn("The frontend will not be served. Did you run 'npm run build'?");
+    if (fs.existsSync(distPath)) {
+      console.log("Static files found. Registering static middleware.");
+      app.use(express.static(distPath));
+    } else {
+      console.warn("CRITICAL WARNING: 'dist' directory not found at:", distPath);
+    }
   }
+
+  // 4. SPA Catch-all (Serve index.html for all other routes)
+  app.get("*", (req, res) => {
+    // If it's an API request that somehow reached here, return JSON 404
+    if (req.url.startsWith('/api')) {
+      return res.status(404).json({ error: "Rruga API nuk u gjet (SPA Fallback)" });
+    }
+
+    const indexPath = path.join(distPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).send(`
+        <html>
+          <body style="font-family: sans-serif; padding: 2rem; line-height: 1.5;">
+            <h1>Frontend Not Found</h1>
+            <p>The server is running, but the frontend files (dist) are missing.</p>
+            <p>Please ensure you have run <code>npm run build</code> before starting the server.</p>
+            <hr>
+            <p>API Health Check: <a href="/api/health">/api/health</a></p>
+          </body>
+        </html>
+      `);
+    }
+  });
+
+  const PORT = Number(process.env.PORT) || 3000;
+  
+  await initDb();
+  
+  httpServer.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server is live and listening on port ${PORT}`);
+  });
 }
 
-// Catch-all for API routes to ensure JSON response
-app.all("/api/*", (req, res) => {
-  console.log(`[DEBUG] API 404 hit: ${req.method} ${req.url}`);
-  res.status(404).json({ 
-    error: "Rruga API nuk u gjet (404)", 
-    method: req.method, 
-    url: req.url,
-    path: req.path,
-    env: getIsNetlify() ? 'Netlify' : 'Other'
-  });
+startApp().catch(e => {
+  console.error("Failed to start application:", e);
 });
-
-// Always register the catch-all route in production/Vercel
-app.get("*", (req, res) => {
-  console.log(`[DEBUG] Catch-all route hit: ${req.method} ${req.url}`);
-  // API routes should have been handled by now
-  if (req.url.startsWith('/api')) {
-    console.log(`[API 404] ${req.method} ${req.url}`);
-    return res.status(404).json({ error: `Rruga API nuk u gjet: ${req.method} ${req.url}` });
-  }
-
-  // Serve index.html for all other routes
-  const indexPath = path.join(distPath, "index.html");
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    res.status(404).send(`
-      <html>
-        <body style="font-family: sans-serif; padding: 2rem; line-height: 1.5;">
-          <h1>Frontend Not Found</h1>
-          <p>The server is running, but the frontend files (dist) are missing.</p>
-          <p><b>Path checked:</b> ${indexPath}</p>
-          <p>Please ensure you have run <code>npm run build</code> before starting the server.</p>
-          <hr>
-          <p>API Health Check: <a href="/api/health">/api/health</a></p>
-        </body>
-      </html>
-    `);
-  }
-});
-
-const PORT = Number(process.env.PORT) || 3000;
-console.log(`Attempting to listen on port ${PORT}...`);
-console.log("Starting httpServer.listen...");
-// Always listen in AI Studio environment, but avoid blocking in serverless functions
-if (!getIsNetlify() && !getIsVercel()) {
-  initDb().then(() => {
-    httpServer.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server is live and listening on port ${PORT}`);
-    });
-  }).catch(e => {
-    console.error("Failed to start server due to DB error:", e);
-  });
-} else if (process.env.AI_STUDIO) {
-  // Special case for AI Studio if it sets an env var, 
-  // but usually we just check if it's NOT Netlify/Vercel
-  initDb().then(() => {
-    httpServer.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server is live and listening on port ${PORT} (AI Studio)`);
-    });
-  }).catch(e => {
-    console.error("Failed to start server (AI Studio) due to DB error:", e);
-  });
-}
 
 export default app;
