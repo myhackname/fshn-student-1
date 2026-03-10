@@ -44,7 +44,7 @@ const getFirebaseAdmin = () => {
 const firebaseApp = getFirebaseAdmin();
 const firestore = firebaseApp ? firebaseApp.firestore() : null;
 
-const getIsNetlify = () => !!process.env.NETLIFY || !!process.env.CONTEXT || !!process.env.DEPLOY_PRIME_URL || process.env.NODE_ENV === 'production';
+const getIsNetlify = () => !!process.env.NETLIFY || !!process.env.CONTEXT || !!process.env.DEPLOY_PRIME_URL;
 const getIsVercel = () => !!process.env.VERCEL;
 const getIsRender = () => !!process.env.RENDER;
 const getIsProduction = () => process.env.NODE_ENV === "production" || getIsVercel() || getIsRender() || getIsNetlify();
