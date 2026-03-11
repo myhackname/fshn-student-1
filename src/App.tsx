@@ -56,9 +56,10 @@ const AuthContext = createContext<{
   login: (token: string, user: User) => void;
   logout: () => void;
   refreshUser: () => Promise<void>;
+  apiFetch: (url: string, options?: RequestInit) => Promise<any>;
 } | null>(null);
 
-const useAuth = () => {
+export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) throw new Error("useAuth must be used within AuthProvider");
   return context;
@@ -116,7 +117,7 @@ const Sidebar = ({ role }: { role: Role }) => {
 };
 
 const Header = () => {
-  const { user, logout, token, refreshUser } = useAuth();
+  const { user, logout, token, refreshUser, apiFetch } = useAuth();
   const [showVerifiedMessage, setShowVerifiedMessage] = useState(false);
 
   useEffect(() => {
@@ -129,9 +130,8 @@ const Header = () => {
       }, 10000);
 
       // Mark as shown in backend
-      fetch('/api/user/mark-verified-shown', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
+      apiFetch('/api/user/mark-verified-shown', {
+        method: 'POST'
       }).then(() => refreshUser());
 
       return () => clearTimeout(timer);
@@ -211,8 +211,8 @@ const Header = () => {
 
 // --- Pages ---
 
-const LoginPage = ({ apiFetch }: { apiFetch: any }) => {
-  const { login } = useAuth();
+const LoginPage = () => {
+  const { login, apiFetch } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -356,7 +356,8 @@ const LoginPage = ({ apiFetch }: { apiFetch: any }) => {
   );
 };
 
-const ForgotPasswordPage = ({ apiFetch }: { apiFetch: any }) => {
+const ForgotPasswordPage = () => {
+  const { apiFetch } = useAuth();
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -428,7 +429,8 @@ const ForgotPasswordPage = ({ apiFetch }: { apiFetch: any }) => {
   );
 };
 
-const ResetPasswordPage = ({ apiFetch }: { apiFetch: any }) => {
+const ResetPasswordPage = () => {
+  const { apiFetch } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const token = searchParams.get('token');
@@ -517,7 +519,8 @@ const ResetPasswordPage = ({ apiFetch }: { apiFetch: any }) => {
   );
 };
 
-const RegisterPage = ({ apiFetch }: { apiFetch: any }) => {
+const RegisterPage = () => {
+  const { apiFetch } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [formData, setFormData] = useState({
@@ -753,7 +756,7 @@ const RegisterPage = ({ apiFetch }: { apiFetch: any }) => {
 };
 
 const ProfilePage = () => {
-  const { user, token, refreshUser } = useAuth();
+  const { user, token, refreshUser, apiFetch } = useAuth();
   const [formData, setFormData] = useState({
     name: user?.name || '',
     surname: user?.surname || '',
@@ -769,21 +772,16 @@ const ProfilePage = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch('/api/user/profile', {
+      await apiFetch('/api/user/profile', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify(formData)
       });
-      if (res.ok) {
-        await refreshUser();
-        setMessage('Profili u përditësua me sukses!');
-        setTimeout(() => setMessage(''), 3000);
-      }
-    } catch (e) {
+      await refreshUser();
+      setMessage('Profili u përditësua me sukses!');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (e: any) {
       console.error(e);
+      setMessage(e.message || 'Gabim gjatë përditësimit');
     } finally {
       setLoading(false);
     }
@@ -831,15 +829,15 @@ const ProfilePage = () => {
                   onClick={async () => {
                     setLoading(true);
                     try {
-                      const res = await fetch('/api/auth/verify-email', {
-                        method: 'POST',
-                        headers: { 'Authorization': `Bearer ${token}` }
+                      await apiFetch('/api/user/verify-email', {
+                        method: 'POST'
                       });
-                      if (res.ok) {
-                        setMessage('Email-i u verifikua me sukses!');
-                        refreshUser();
-                      }
-                    } catch (e) { console.error(e); }
+                      setMessage('Email-i u verifikua me sukses!');
+                      refreshUser();
+                    } catch (e: any) { 
+                      console.error(e); 
+                      setMessage(e.message || 'Gabim gjatë verifikimit');
+                    }
                     setLoading(false);
                   }}
                   disabled={loading}
@@ -894,17 +892,15 @@ const ProfilePage = () => {
                     onClick={async () => {
                       setLoading(true);
                       try {
-                        const res = await fetch('/api/user/verify-email', {
-                          method: 'POST',
-                          headers: { 'Authorization': `Bearer ${token}` }
+                        await apiFetch('/api/user/verify-email', {
+                          method: 'POST'
                         });
-                        if (res.ok) {
-                          await refreshUser();
-                          setMessage('Emaili u verifikua me sukses!');
-                          setTimeout(() => setMessage(''), 3000);
-                        }
-                      } catch (e) {
+                        await refreshUser();
+                        setMessage('Emaili u verifikua me sukses!');
+                        setTimeout(() => setMessage(''), 3000);
+                      } catch (e: any) {
                         console.error(e);
+                        setMessage(e.message || 'Gabim gjatë verifikimit');
                       } finally {
                         setLoading(false);
                       }
@@ -1004,7 +1000,7 @@ const PendingApproval = () => {
 };
 
 const RejectedView = () => {
-  const { token, refreshUser, logout } = useAuth();
+  const { token, refreshUser, logout, apiFetch } = useAuth();
   const [formData, setFormData] = useState({
     program: 'SHKENCA KOMPJUTERIKE',
     year: 'VITI 1',
@@ -1017,17 +1013,11 @@ const RejectedView = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch('/api/student/change-classroom', {
+      await apiFetch('/api/student/change-classroom', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify(formData)
       });
-      if (res.ok) {
-        await refreshUser();
-      }
+      await refreshUser();
     } catch (e) {
       console.error(e);
     } finally {
@@ -1133,7 +1123,7 @@ const Progress3D = ({ value, label, color }: { value: number, label: string, col
 };
 
 const Dashboard = () => {
-  const { user, token } = useAuth();
+  const { user, token, apiFetch } = useAuth();
   const [stats, setStats] = useState<any>(null);
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [pendingStudents, setPendingStudents] = useState<any[]>([]);
@@ -1151,63 +1141,48 @@ const Dashboard = () => {
 
   const fetchCurrentLecture = async () => {
     try {
-      const res = await fetch('/api/teacher/current-lecture', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) setCurrentLecture(await res.json());
+      const data = await apiFetch('/api/teacher/current-lecture');
+      setCurrentLecture(data);
     } catch (e) { console.error(e); }
   };
 
   const fetchStudentClassStatus = async () => {
     try {
-      const res = await fetch('/api/student/class-status', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) setCurrentLecture(await res.json());
+      const data = await apiFetch('/api/student/class-status');
+      setCurrentLecture(data);
     } catch (e) { console.error(e); }
   };
 
   const handleLectureStatus = async (status: string) => {
     try {
-      const res = await fetch('/api/teacher/lecture-status', {
+      await apiFetch('/api/teacher/lecture-status', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify({ scheduleId: currentLecture.id, status })
       });
-      if (res.ok) fetchCurrentLecture();
+      fetchCurrentLecture();
     } catch (e) { console.error(e); }
   };
 
   const fetchPendingStudents = async () => {
     try {
-      const res = await fetch('/api/admin/pending-members', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) setPendingStudents(await res.json());
+      const data = await apiFetch('/api/admin/pending-members');
+      setPendingStudents(data);
     } catch (e) { console.error(e); }
   };
 
   const handleApprove = async (memberId: number, status: string) => {
     try {
-      const res = await fetch('/api/admin/approve-member', {
+      await apiFetch('/api/admin/approve-member', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify({ memberId, status })
       });
-      if (res.ok) fetchPendingStudents();
+      fetchPendingStudents();
     } catch (e) { console.error(e); }
   };
 
   const fetchDashboardData = async () => {
     try {
-      const res = await fetch('/api/analytics/student/me', { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
+      const data = await apiFetch('/api/analytics/student/me');
       setStats(data);
       
       setRecentActivity([
@@ -1421,7 +1396,7 @@ const Dashboard = () => {
 };
 
 const Layout = ({ children }: { children: React.ReactNode }) => {
-  const { user, token } = useAuth();
+  const { user, token, apiFetch } = useAuth();
   const navigate = useNavigate();
   
   useEffect(() => {
@@ -1430,10 +1405,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
       // Check if student belongs to this class
       if (user?.role === 'STUDENT' && data.classId) {
         try {
-          const res = await fetch('/api/classes/my', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          const myClasses = await res.json();
+          const myClasses = await apiFetch('/api/classes/my');
           if (myClasses.some((c: any) => c.id === data.classId)) {
             navigate('/attendance');
           }
@@ -1505,10 +1477,12 @@ export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
 
   const apiFetch = async (url: string, options: RequestInit = {}) => {
+    console.log(`[apiFetch] Calling: ${url}`);
+    const isFormData = options.body instanceof FormData;
     const res = await fetch(url, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         ...options.headers,
       },
@@ -1560,24 +1534,24 @@ export default function App() {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, token, login, logout, refreshUser, apiFetch }}>
       <Router>
         <Routes>
-          <Route path="/login" element={<LoginPage apiFetch={apiFetch} />} />
-          <Route path="/register" element={<RegisterPage apiFetch={apiFetch} />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage apiFetch={apiFetch} />} />
-          <Route path="/reset-password" element={<ResetPasswordPage apiFetch={apiFetch} />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/" element={<Layout><Dashboard /></Layout>} />
-          <Route path="/attendance" element={<Layout><Attendance user={user} token={token || ''} /></Layout>} />
-          <Route path="/calendar" element={<Layout><Calendar user={user} token={token || ''} /></Layout>} />
-          <Route path="/tests" element={<Layout><Tests user={user} token={token || ''} /></Layout>} />
-          <Route path="/assignments" element={<Layout><Assignments user={user} token={token || ''} /></Layout>} />
-          <Route path="/live-questions" element={<Layout><LiveQuestions user={user} token={token || ''} /></Layout>} />
-          <Route path="/screen-share" element={<Layout><ScreenShare user={user} token={token || ''} /></Layout>} />
-          <Route path="/chat" element={<Layout><Chat user={user} token={token || ''} /></Layout>} />
-          <Route path="/classroom" element={<Layout><Classroom user={user} token={token || ''} /></Layout>} />
-          <Route path="/library" element={<Layout><Library user={user} token={token || ''} /></Layout>} />
-          <Route path="/analytics" element={<Layout><Analytics user={user} token={token || ''} /></Layout>} />
+          <Route path="/attendance" element={<Layout><Attendance /></Layout>} />
+          <Route path="/calendar" element={<Layout><Calendar /></Layout>} />
+          <Route path="/tests" element={<Layout><Tests /></Layout>} />
+          <Route path="/assignments" element={<Layout><Assignments /></Layout>} />
+          <Route path="/live-questions" element={<Layout><LiveQuestions /></Layout>} />
+          <Route path="/screen-share" element={<Layout><ScreenShare /></Layout>} />
+          <Route path="/chat" element={<Layout><Chat /></Layout>} />
+          <Route path="/classroom" element={<Layout><Classroom /></Layout>} />
+          <Route path="/library" element={<Layout><Library /></Layout>} />
+          <Route path="/analytics" element={<Layout><Analytics /></Layout>} />
           <Route path="/profile" element={<Layout><ProfilePage /></Layout>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

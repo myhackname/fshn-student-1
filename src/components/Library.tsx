@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Book, Download, Upload, FileText, Search, Plus, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useAuth } from '../App';
 
 interface BookType {
   id: number;
@@ -11,12 +12,8 @@ interface BookType {
   created_at: string;
 }
 
-interface LibraryProps {
-  user: any;
-  token: string;
-}
-
-const Library: React.FC<LibraryProps> = ({ user, token }) => {
+const Library: React.FC = () => {
+  const { user, apiFetch } = useAuth();
   const [books, setBooks] = useState<BookType[]>([]);
   const [loading, setLoading] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
@@ -34,12 +31,8 @@ const Library: React.FC<LibraryProps> = ({ user, token }) => {
 
   const fetchBooks = async () => {
     try {
-      const res = await fetch('/api/library/books', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        setBooks(await res.json());
-      }
+      const data = await apiFetch('/api/library/books');
+      setBooks(data);
     } catch (e) {
       console.error(e);
     } finally {
@@ -58,16 +51,13 @@ const Library: React.FC<LibraryProps> = ({ user, token }) => {
     data.append('file', formData.file);
 
     try {
-      const res = await fetch('/api/library/upload', {
+      await apiFetch('/api/library/upload', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
         body: data
       });
-      if (res.ok) {
-        setShowUpload(false);
-        setFormData({ title: '', author: '', file: null });
-        fetchBooks();
-      }
+      setShowUpload(false);
+      setFormData({ title: '', author: '', file: null });
+      fetchBooks();
     } catch (e) {
       console.error(e);
     } finally {

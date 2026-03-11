@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calendar as CalendarIcon, Plus, Trash2, Clock, MapPin, Building, GraduationCap } from 'lucide-react';
 import { User } from '../types';
+import { useAuth } from '../App';
 
 interface Schedule {
   id: number;
@@ -29,7 +30,8 @@ const YEARS = [
 const GROUPS = ['A', 'B', 'C'];
 const BUILDINGS = ['A', 'B', 'C', 'D'];
 
-export default function Calendar({ user, token }: { user: User | null, token: string }) {
+export default function Calendar() {
+  const { user, apiFetch } = useAuth();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -47,10 +49,7 @@ export default function Calendar({ user, token }: { user: User | null, token: st
 
   const fetchSchedules = async () => {
     try {
-      const res = await fetch('/api/schedules', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
+      const data = await apiFetch('/api/schedules');
       setSchedules(data);
     } catch (err) {
       console.error(err);
@@ -70,18 +69,12 @@ export default function Calendar({ user, token }: { user: User | null, token: st
       program: newSchedule.program === 'Tjetër' ? newSchedule.custom_program : newSchedule.program
     };
     try {
-      const res = await fetch('/api/schedules', {
+      await apiFetch('/api/schedules', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify(payload)
       });
-      if (res.ok) {
-        setShowAddModal(false);
-        fetchSchedules();
-      }
+      setShowAddModal(false);
+      fetchSchedules();
     } catch (err) {
       console.error(err);
     }
@@ -90,9 +83,8 @@ export default function Calendar({ user, token }: { user: User | null, token: st
   const handleDeleteSchedule = async (id: number) => {
     if (!confirm('A jeni i sigurt që dëshironi ta fshini këtë orar?')) return;
     try {
-      await fetch(`/api/schedules/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+      await apiFetch(`/api/schedules/${id}`, {
+        method: 'DELETE'
       });
       fetchSchedules();
     } catch (err) {

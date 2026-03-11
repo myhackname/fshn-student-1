@@ -3,8 +3,10 @@ import { motion } from 'motion/react';
 import { Users, Search, Mail, Phone, MessageSquare, CheckCircle, Clock } from 'lucide-react';
 import MotionLogo from './MotionLogo';
 import { io, Socket } from 'socket.io-client';
+import { useAuth } from '../App';
 
-export default function Classroom({ user, token }: { user: any, token: string }) {
+export default function Classroom() {
+  const { user, apiFetch } = useAuth();
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -29,10 +31,7 @@ export default function Classroom({ user, token }: { user: any, token: string })
 
   const fetchMembers = async () => {
     try {
-      const res = await fetch('/api/class/members', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
+      const data = await apiFetch('/api/class/members');
       setMembers(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);

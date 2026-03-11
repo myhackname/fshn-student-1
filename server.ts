@@ -735,6 +735,7 @@ const authenticate = (req: any, res: any, next: any) => {
   });
 
   app.post("/api/auth/login", async (req, res) => {
+    console.log(`[LOGIN] Request received: ${req.method} ${req.url}`);
     const { email, password } = req.body;
     console.log(`[LOGIN] Request received for: ${email}`);
 
@@ -1091,7 +1092,59 @@ const authenticate = (req: any, res: any, next: any) => {
     res.json({ success: true });
   });
 
-  app.get("/api/student/class-status", authenticate, (req: any, res) => {
+  app.get("/api/student/class-status", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
+        const user = userSnap.data();
+        if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+
+        const classSnap = await firestore.collection('classes')
+          .where('department', '==', user.program)
+          .where('year', '==', user.year)
+          .where('group_name', '==', user.group_name)
+          .where('study_type', '==', user.study_type)
+          .get();
+        
+        if (classSnap.empty) return res.json(null);
+        const classroom = classSnap.docs[0].data();
+
+        const now = new Date();
+        const day = now.getDay();
+        const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+        const lectureSnap = await firestore.collection('teacher_schedule')
+          .where('class_id', '==', classroom.id)
+          .where('day_of_week', '==', day.toString())
+          .get();
+        
+        const lectures = lectureSnap.docs.map(doc => doc.data());
+        const lecture = lectures.find(l => l.start_time <= time && l.end_time >= time);
+
+        if (!lecture) return res.json(null);
+
+        // Get teacher name
+        const teacherSnap = await firestore.collection('users').doc(lecture.teacher_id).get();
+        const teacher = teacherSnap.data();
+
+        // Get status
+        const statusSnap = await firestore.collection('lecture_status')
+          .where('schedule_id', '==', lecture.id)
+          .get();
+        
+        const status = statusSnap.empty ? null : statusSnap.docs[0].data();
+
+        return res.json({
+          ...lecture,
+          teacher_name: teacher ? `${teacher.name} ${teacher.surname}` : 'I panjohur',
+          status: status?.status
+        });
+      } catch (e) {
+        console.error("Firestore Class Status Error:", e);
+        return res.status(500).json({ error: "Gabim në Firebase" });
+      }
+    }
+
     const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(req.user.id) as any;
     if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
     const classroom = db.prepare("SELECT id FROM classes WHERE department = ? AND year = ? AND group_name = ? AND study_type = ?")
@@ -1117,15 +1170,18 @@ const authenticate = (req: any, res: any, next: any) => {
     const { name, surname, phone, bio, group_name, study_type } = req.body;
     if (firestore) {
       try {
-        await firestore.collection('users').doc(req.user.id.toString()).update({
-          name, surname, phone, bio, group_name, study_type
-        });
-        const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
-        const user = userSnap.data();
-        if (user) delete user.password;
-        return res.json(user);
+        const userRef = firestore.collection('users').doc(req.user.id.toString());
+        const userSnap = await userRef.get();
+        if (userSnap.exists) {
+          await userRef.update({
+            name, surname, phone, bio, group_name, study_type
+          });
+          const updatedUser = (await userRef.get()).data();
+          if (updatedUser) delete updatedUser.password;
+          return res.json(updatedUser);
+        }
       } catch (e) {
-        return res.status(500).json({ error: "Gabim në Firebase" });
+        console.error("Firestore Profile Update Error:", e);
       }
     }
     try {
@@ -1136,10 +1192,10 @@ const authenticate = (req: any, res: any, next: any) => {
       `).run(name, surname, phone, bio, group_name, study_type, req.user.id);
       
       const user = db.prepare("SELECT * FROM users WHERE id = ?").get(req.user.id) as any;
-      delete user.password;
+      if (user) delete user.password;
       res.json(user);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Gabim gjatë përditësimit të profilit" });
     }
   });
 
@@ -1180,37 +1236,39 @@ const authenticate = (req: any, res: any, next: any) => {
   app.get("/api/class/members", authenticate, async (req: any, res) => {
     if (firestore) {
       try {
-        const userSnap = await firestore.collection('users').doc(req.user.id).get();
-        const user = userSnap.data();
-        if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+        const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
+        if (userSnap.exists) {
+          const user = userSnap.data();
+          if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
 
-        const membersSnap = await firestore.collection('users')
-          .where('program', '==', user.program)
-          .where('year', '==', user.year)
-          .where('group_name', '==', user.group_name)
-          .where('study_type', '==', user.study_type)
-          .get();
+          const membersSnap = await firestore.collection('users')
+            .where('program', '==', user.program)
+            .where('year', '==', user.year)
+            .where('group_name', '==', user.group_name)
+            .where('study_type', '==', user.study_type)
+            .get();
 
-        const members = membersSnap.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: data.id,
-            name: data.name,
-            surname: data.surname,
-            role: data.role,
-            profile_photo: data.profile_photo
-          };
-        });
+          const members = membersSnap.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: data.id,
+              name: data.name,
+              surname: data.surname,
+              role: data.role,
+              profile_photo: data.profile_photo
+            };
+          });
 
-        const onlineUserIds = new Set(Array.from(onlineUsers.values()).map((u: any) => u.id));
-        const membersWithStatus = members.map(m => ({
-          ...m,
-          isOnline: onlineUserIds.has(m.id)
-        }));
+          const onlineUserIds = new Set(Array.from(onlineUsers.values()).map((u: any) => u.id));
+          const membersWithStatus = members.map(m => ({
+            ...m,
+            isOnline: onlineUserIds.has(m.id)
+          }));
 
-        return res.json(membersWithStatus);
+          return res.json(membersWithStatus);
+        }
       } catch (err) {
-        return res.status(500).json({ error: "Gabim në Firebase" });
+        console.error("Firestore error in /api/class/members:", err);
       }
     }
     try {
@@ -1240,29 +1298,36 @@ const authenticate = (req: any, res: any, next: any) => {
     if (firestore) {
       try {
         const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
-        const user = userSnap.data();
-        if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+        if (userSnap.exists) {
+          const user = userSnap.data();
+          const memberSnap = await firestore.collection('class_members').where('user_id', '==', user.id).get();
+          const member = memberSnap.empty ? null : memberSnap.docs[0].data();
 
-        const memberSnap = await firestore.collection('class_members').where('user_id', '==', user.id).get();
-        const member = memberSnap.empty ? null : memberSnap.docs[0].data();
-
-        return res.json({
-          ...user,
-          class_status: member?.status,
-          is_class_admin: member?.is_admin
-        });
+          return res.json({
+            ...user,
+            class_status: member?.status,
+            is_class_admin: member?.is_admin
+          });
+        }
       } catch (e) {
-        return res.status(500).json({ error: "Gabim në Firebase" });
+        console.error("Firestore error in /api/user/me:", e);
       }
     }
-    const user = db.prepare(`
-      SELECT u.id, u.name, u.surname, u.email, u.role, u.class_code, u.program, u.year, u.group_name, u.study_type, u.phone, u.bio, u.profile_photo, u.is_confirmed, u.email_verified,
-             cm.status as class_status, cm.is_admin as is_class_admin
-      FROM users u
-      LEFT JOIN class_members cm ON u.id = cm.user_id
-      WHERE u.id = ?
-    `).get(req.user.id) as any;
-    res.json(user);
+    
+    try {
+      const user = db.prepare(`
+        SELECT u.id, u.name, u.surname, u.email, u.role, u.class_code, u.program, u.year, u.group_name, u.study_type, u.phone, u.bio, u.profile_photo, u.is_confirmed, u.email_verified,
+               cm.status as class_status, cm.is_admin as is_class_admin
+        FROM users u
+        LEFT JOIN class_members cm ON u.id = cm.user_id
+        WHERE u.id = ?
+      `).get(req.user.id) as any;
+      
+      if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+      res.json(user);
+    } catch (err) {
+      res.status(500).json({ error: "Gabim gjatë marrjes së të dhënave të përdoruesit" });
+    }
   });
 
   app.post("/api/user/profile-photo", authenticate, upload.single('photo'), async (req: any, res) => {
@@ -1535,7 +1600,25 @@ const authenticate = (req: any, res: any, next: any) => {
     res.json({ ...session, presence });
   });
 
-  app.get("/api/attendance/stats", authenticate, (req: any, res) => {
+  app.get("/api/attendance/stats", authenticate, async (req: any, res) => {
+    if (firestore) {
+      try {
+        const snap = await firestore.collection('attendance')
+          .where('user_id', '==', req.user.id.toString())
+          .get();
+        
+        const counts: Record<string, number> = {};
+        snap.docs.forEach(doc => {
+          const status = doc.data().status;
+          counts[status] = (counts[status] || 0) + 1;
+        });
+
+        const stats = Object.entries(counts).map(([status, count]) => ({ status, count }));
+        return res.json(stats);
+      } catch (e) {
+        console.error("Firestore Attendance Stats Error:", e);
+      }
+    }
     const stats = db.prepare(`
       SELECT status, COUNT(*) as count 
       FROM attendance 
@@ -2542,43 +2625,46 @@ const authenticate = (req: any, res: any, next: any) => {
           .where('chat_type', '==', type || 'CLASS');
 
         if (type === 'CLASS') {
-          const userSnap = await firestore.collection('users').doc(req.user.id).get();
-          const user = userSnap.data();
-          if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+          const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
+          if (userSnap.exists) {
+            const user = userSnap.data();
+            if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
 
-          const classSnap = await firestore.collection('classes')
-            .where('department', '==', user.program)
-            .where('year', '==', user.year)
-            .where('group_name', '==', user.group_name)
-            .where('study_type', '==', user.study_type)
-            .get();
+            const classSnap = await firestore.collection('classes')
+              .where('department', '==', user.program)
+              .where('year', '==', user.year)
+              .where('group_name', '==', user.group_name)
+              .where('study_type', '==', user.study_type)
+              .get();
 
-          if (!classSnap.empty) {
-            query = query.where('class_id', '==', classSnap.docs[0].id);
+            if (!classSnap.empty) {
+              query = query.where('class_id', '==', classSnap.docs[0].id);
+            }
           }
         }
 
         const messagesSnap = await query.get();
-        const messages = messagesSnap.docs.map((doc: any) => {
-          const data = doc.data();
-          return {
-            ...data,
-            id: doc.id,
-            timestamp: data.timestamp?.toDate()?.toISOString()
-          };
-        });
+        if (!messagesSnap.empty || type !== 'CLASS') {
+          const messages = messagesSnap.docs.map((doc: any) => {
+            const data = doc.data();
+            return {
+              ...data,
+              id: doc.id,
+              timestamp: data.timestamp?.toDate()?.toISOString()
+            };
+          });
 
-        // Sort in memory to avoid composite index requirement
-        messages.sort((a: any, b: any) => {
-          const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-          const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-          return timeA - timeB; // Oldest first for chat display
-        });
+          // Sort in memory to avoid composite index requirement
+          messages.sort((a: any, b: any) => {
+            const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return timeA - timeB; // Oldest first for chat display
+          });
 
-        return res.json(messages.slice(-100)); // Return last 100 messages
+          return res.json(messages.slice(-100)); // Return last 100 messages
+        }
       } catch (e) {
         console.error("Firestore Chat Error:", e);
-        return res.status(500).json({ error: "Gabim në Firebase" });
       }
     }
 
@@ -2741,24 +2827,25 @@ const authenticate = (req: any, res: any, next: any) => {
     if (firestore) {
       try {
         const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
-        const user = userSnap.data();
-        if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+        if (userSnap.exists) {
+          const user = userSnap.data();
+          if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
 
-        const classSnap = await firestore.collection('classes')
-          .where('department', '==', user.program)
-          .where('year', '==', user.year)
-          .where('group_name', '==', user.group_name)
-          .where('study_type', '==', user.study_type)
-          .get();
+          const classSnap = await firestore.collection('classes')
+            .where('department', '==', user.program)
+            .where('year', '==', user.year)
+            .where('group_name', '==', user.group_name)
+            .where('study_type', '==', user.study_type)
+            .get();
 
-        if (classSnap.empty) return res.json([]);
-        const classId = classSnap.docs[0].id;
+          if (classSnap.empty) return res.json([]);
+          const classId = classSnap.docs[0].id;
 
-        const booksSnap = await firestore.collection('library_books').where('class_id', '==', classId).get();
-        return res.json(booksSnap.docs.map(doc => doc.data()));
+          const booksSnap = await firestore.collection('library_books').where('class_id', '==', classId).get();
+          return res.json(booksSnap.docs.map(doc => doc.data()));
+        }
       } catch (e) {
         console.error("Firestore Library Error:", e);
-        return res.status(500).json({ error: "Gabim në Firebase" });
       }
     }
     const user = db.prepare("SELECT program, year, group_name, study_type FROM users WHERE id = ?").get(req.user.id) as any;
@@ -2787,38 +2874,40 @@ const authenticate = (req: any, res: any, next: any) => {
     if (firestore) {
       try {
         const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
-        const user = userSnap.data();
-        if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+        if (userSnap.exists) {
+          const user = userSnap.data();
+          if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
 
-        const memberSnap = await firestore.collection('class_members').where('user_id', '==', req.user.id).get();
-        const member = memberSnap.empty ? null : memberSnap.docs[0].data();
+          const memberSnap = await firestore.collection('class_members').where('user_id', '==', req.user.id).get();
+          const member = memberSnap.empty ? null : memberSnap.docs[0].data();
 
-        if (user.role !== 'TEACHER' && !member?.is_admin) {
-          return res.status(403).json({ error: "Vetëm mësuesit dhe presidenti i klasës mund të publikojnë libra" });
+          if (user.role !== 'TEACHER' && !member?.is_admin) {
+            return res.status(403).json({ error: "Vetëm mësuesit dhe presidenti i klasës mund të publikojnë libra" });
+          }
+
+          const classSnap = await firestore.collection('classes')
+            .where('department', '==', user.program)
+            .where('year', '==', user.year)
+            .where('group_name', '==', user.group_name)
+            .where('study_type', '==', user.study_type)
+            .get();
+
+          if (classSnap.empty) return res.status(400).json({ error: "Klasa nuk u gjet" });
+          const classId = classSnap.docs[0].id;
+
+          const bookRef = firestore.collection('library_books').doc();
+          await bookRef.set({
+            id: bookRef.id,
+            title, author: author || "I panjohur",
+            file_path: filePath,
+            uploader_id: req.user.id,
+            class_id: classId,
+            created_at: admin.firestore.FieldValue.serverTimestamp()
+          });
+          return res.json({ id: bookRef.id });
         }
-
-        const classSnap = await firestore.collection('classes')
-          .where('department', '==', user.program)
-          .where('year', '==', user.year)
-          .where('group_name', '==', user.group_name)
-          .where('study_type', '==', user.study_type)
-          .get();
-
-        if (classSnap.empty) return res.status(400).json({ error: "Klasa nuk u gjet" });
-        const classId = classSnap.docs[0].id;
-
-        const bookRef = firestore.collection('library_books').doc();
-        await bookRef.set({
-          id: bookRef.id,
-          title, author: author || "I panjohur",
-          file_path: filePath,
-          uploader_id: req.user.id,
-          class_id: classId,
-          created_at: admin.firestore.FieldValue.serverTimestamp()
-        });
-        return res.json({ id: bookRef.id });
       } catch (e) {
-        return res.status(500).json({ error: "Gabim në Firebase" });
+        console.error("Firestore Library Upload Error:", e);
       }
     }
 
@@ -2829,6 +2918,8 @@ const authenticate = (req: any, res: any, next: any) => {
       LEFT JOIN class_members cm ON u.id = cm.user_id
       WHERE u.id = ?
     `).get(req.user.id) as any;
+
+    if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
 
     if (user.role !== 'TEACHER' && !user.is_class_admin) {
       return res.status(403).json({ error: "Vetëm mësuesit dhe presidenti i klasës mund të publikojnë libra" });
@@ -2850,22 +2941,26 @@ const authenticate = (req: any, res: any, next: any) => {
     if (firestore) {
       try {
         if (req.user.role === 'TEACHER') {
-          const snap = await firestore.collection('schedules').where('teacher_id', '==', req.user.id).get();
-          return res.json(snap.docs.map(doc => doc.data()));
+          const snap = await firestore.collection('schedules').where('teacher_id', '==', req.user.id.toString()).get();
+          if (!snap.empty) {
+            return res.json(snap.docs.map(doc => doc.data()));
+          }
         } else {
-          const userSnap = await firestore.collection('users').doc(req.user.id).get();
-          const user = userSnap.data();
-          if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
+          const userSnap = await firestore.collection('users').doc(req.user.id.toString()).get();
+          if (userSnap.exists) {
+            const user = userSnap.data();
+            if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
 
-          const snap = await firestore.collection('schedules')
-            .where('program', '==', user.program)
-            .where('year', '==', user.year)
-            .where('group_name', '==', user.group_name)
-            .get();
-          return res.json(snap.docs.map(doc => doc.data()));
+            const snap = await firestore.collection('schedules')
+              .where('program', '==', user.program)
+              .where('year', '==', user.year)
+              .where('group_name', '==', user.group_name)
+              .get();
+            return res.json(snap.docs.map(doc => doc.data()));
+          }
         }
       } catch (e) {
-        return res.status(500).json({ error: "Gabim në Firebase" });
+        console.error("Firestore Schedule Error:", e);
       }
     }
     let schedules;
@@ -2874,6 +2969,7 @@ const authenticate = (req: any, res: any, next: any) => {
     } else {
       // For students, filter by their program, year and group
       const user = db.prepare("SELECT program, year, group_name FROM users WHERE id = ?").get(req.user.id) as any;
+      if (!user) return res.status(404).json({ error: "Përdoruesi nuk u gjet" });
       schedules = db.prepare(`
         SELECT s.*, u.name as teacher_name 
         FROM schedules s 
@@ -3113,8 +3209,9 @@ setupSocket();
 const distPath = path.join(_dirname, "dist");
 
 async function startApp() {
+  console.log("startApp() is initializing...");
   // 1. API Catch-all (for any /api/* routes that didn't match)
-  app.all("/api/*", (req, res) => {
+  app.all(["/api", "/api/*"], (req, res) => {
     console.log(`[API 404] ${req.method} ${req.url}`);
     res.status(404).json({ 
       error: "Rruga API nuk u gjet (404)", 

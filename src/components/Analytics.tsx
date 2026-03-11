@@ -9,6 +9,7 @@ import {
   Award, Calendar, ChevronRight, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 import MotionLogo from './MotionLogo';
+import { useAuth } from '../App';
 
 const Progress3D = ({ value, label, color }: { value: number, label: string, color: string, key?: any }) => {
   const height = Math.max(10, value);
@@ -39,7 +40,8 @@ const Progress3D = ({ value, label, color }: { value: number, label: string, col
   );
 };
 
-export default function Analytics({ user, token }: { user: any, token: string }) {
+export default function Analytics() {
+  const { user, apiFetch } = useAuth();
   const [studentData, setStudentData] = useState<any>(null);
   const [classData, setClassData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -51,13 +53,11 @@ export default function Analytics({ user, token }: { user: any, token: string })
   const fetchData = async () => {
     setLoading(true);
     try {
-      if (user.role === 'STUDENT') {
-        const res = await fetch('/api/analytics/student/me', { headers: { 'Authorization': `Bearer ${token}` } });
-        const data = await res.json();
+      if (user?.role === 'STUDENT') {
+        const data = await apiFetch('/api/analytics/student/me');
         setStudentData(data);
       } else {
-        const res = await fetch('/api/analytics/class', { headers: { 'Authorization': `Bearer ${token}` } });
-        const data = await res.json();
+        const data = await apiFetch('/api/analytics/class');
         setClassData(data);
       }
     } catch (error) {

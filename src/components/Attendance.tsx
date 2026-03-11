@@ -3,8 +3,10 @@ import { motion } from 'motion/react';
 import { CheckCircle, XCircle, UserCheck, Users, Play, Square, Clock, AlertCircle, Calendar } from 'lucide-react';
 import MotionLogo from './MotionLogo';
 import { io, Socket } from 'socket.io-client';
+import { useAuth } from '../App';
 
-export default function Attendance({ user, token }: { user: any, token: string }) {
+export default function Attendance() {
+  const { user, apiFetch } = useAuth();
   const [activeSession, setActiveSession] = useState<any>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [loading, setLoading] = useState(false);
@@ -17,11 +19,13 @@ export default function Attendance({ user, token }: { user: any, token: string }
 
   useEffect(() => {
     fetchActiveSession();
-    if (user.role === 'TEACHER') fetchClasses();
+    if (user?.role === 'TEACHER') fetchClasses();
     
     const s = io();
     setSocket(s);
-    s.emit('join', { id: user.id, name: user.name, role: user.role });
+    if (user) {
+      s.emit('join', { id: user.id, name: user.name, role: user.role });
+    }
 
     s.on('study_session_start', (data: any) => {
       fetchActiveSession();
@@ -83,8 +87,7 @@ export default function Attendance({ user, token }: { user: any, token: string }
 
   const fetchClasses = async () => {
     try {
-      const res = await fetch('/api/classes', { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
+      const data = await apiFetch('/api/classes');
       if (Array.isArray(data)) {
         setClasses(data);
       } else {
@@ -99,8 +102,7 @@ export default function Attendance({ user, token }: { user: any, token: string }
 
   const fetchActiveSession = async () => {
     try {
-      const res = await fetch('/api/study/active', { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
+      const data = await apiFetch('/api/study/active');
       setActiveSession(data);
     } catch (e) { console.error(e); }
   };
@@ -109,12 +111,8 @@ export default function Attendance({ user, token }: { user: any, token: string }
     if (!classId || !subject) return alert("Plotësoni të gjitha fushat");
     setLoading(true);
     try {
-      await fetch('/api/study/start', {
+      await apiFetch('/api/study/start', {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({ classId, subject, duration })
       });
     } catch (e) { console.error(e); }
@@ -125,12 +123,8 @@ export default function Attendance({ user, token }: { user: any, token: string }
     if (!activeSession) return;
     setLoading(true);
     try {
-      await fetch('/api/study/end', {
+      await apiFetch('/api/study/end', {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({ sessionId: activeSession.id })
       });
     } catch (e) { console.error(e); }
@@ -139,12 +133,8 @@ export default function Attendance({ user, token }: { user: any, token: string }
 
   const confirmPresence = async () => {
     try {
-      await fetch('/api/study/confirm', {
+      await apiFetch('/api/study/confirm', {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({ sessionId: activeSession.id })
       });
     } catch (e) { console.error(e); }
@@ -152,12 +142,8 @@ export default function Attendance({ user, token }: { user: any, token: string }
 
   const verifyPresence = async (userId: number) => {
     try {
-      await fetch('/api/study/verify', {
+      await apiFetch('/api/study/verify', {
         method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
         body: JSON.stringify({ sessionId: activeSession.id, userId })
       });
     } catch (e) { console.error(e); }

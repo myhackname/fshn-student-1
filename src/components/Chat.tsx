@@ -4,8 +4,10 @@ import { Send, User, Hash, Search, MoreVertical, MessageSquare } from 'lucide-re
 import MotionLogo from './MotionLogo';
 import { io, Socket } from 'socket.io-client';
 import { Message } from '../types';
+import { useAuth } from '../App';
 
-export default function Chat({ user, token }: { user: any, token: string }) {
+export default function Chat() {
+  const { user, apiFetch } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -50,35 +52,18 @@ export default function Chat({ user, token }: { user: any, token: string }) {
 
   const fetchClassMembers = async () => {
     try {
-      const res = await fetch('/api/class/members', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        const data = await res.json();
-        setClassMembers(Array.isArray(data) ? data : []);
-      } else {
-        console.error("Non-JSON response from class members");
-        setClassMembers([]);
-      }
+      const data = await apiFetch('/api/class/members');
+      setClassMembers(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error(e);
+      setClassMembers([]);
     }
   };
 
   const fetchMessages = async () => {
     try {
-      const res = await fetch(`/api/chat/messages?type=${chatType}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const contentType = res.headers.get("content-type");
-      if (contentType && contentType.indexOf("application/json") !== -1) {
-        const data = await res.json();
-        setMessages(Array.isArray(data) ? data : []);
-      } else {
-        console.error("Non-JSON response from chat messages");
-        setMessages([]);
-      }
+      const data = await apiFetch(`/api/chat/messages?type=${chatType}`);
+      setMessages(Array.isArray(data) ? data : []);
     } catch (e) { 
       console.error(e);
       setMessages([]);

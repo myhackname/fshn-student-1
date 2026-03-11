@@ -10,8 +10,10 @@ import { Test, Question, TestAttempt, TestAnswer } from '../types';
 import { io, Socket } from 'socket.io-client';
 
 import { jsPDF } from 'jspdf';
+import { useAuth } from '../App';
 
-export default function Tests({ user, token }: { user: any, token: string }) {
+export default function Tests() {
+  const { user, apiFetch } = useAuth();
   // ... existing state ...
 
   const generatePDF = (result: any) => {
@@ -79,14 +81,12 @@ export default function Tests({ user, token }: { user: any, token: string }) {
 
   const fetchAnalytics = async () => {
     if (!selectedTest) return;
-    const res = await fetch(`/api/tests/${selectedTest.id}/analytics`, { headers: { 'Authorization': `Bearer ${token}` } });
-    const data = await res.json();
+    const data = await apiFetch(`/api/tests/${selectedTest.id}/analytics`);
     setAnalytics(data);
   };
 
   const fetchStudentResults = async () => {
-    const res = await fetch('/api/student/results', { headers: { 'Authorization': `Bearer ${token}` } });
-    const data = await res.json();
+    const data = await apiFetch('/api/student/results');
     setStudentResults(data);
   };
 
@@ -106,8 +106,7 @@ export default function Tests({ user, token }: { user: any, token: string }) {
 
   const fetchTests = async () => {
     try {
-      const res = await fetch('/api/tests', { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
+      const data = await apiFetch('/api/tests');
       if (Array.isArray(data)) {
         setTests(data);
       } else {
@@ -121,15 +120,13 @@ export default function Tests({ user, token }: { user: any, token: string }) {
   };
 
   const fetchQuestions = async (testId: number) => {
-    const res = await fetch(`/api/tests/${testId}/questions`, { headers: { 'Authorization': `Bearer ${token}` } });
-    const data = await res.json();
+    const data = await apiFetch(`/api/tests/${testId}/questions`);
     setQuestions(data);
   };
 
   const fetchMonitoring = async () => {
     if (!selectedTest) return;
-    const res = await fetch(`/api/tests/${selectedTest.id}/monitoring`, { headers: { 'Authorization': `Bearer ${token}` } });
-    const data = await res.json();
+    const data = await apiFetch(`/api/tests/${selectedTest.id}/monitoring`);
     setMonitoringData(data);
   };
 
@@ -147,15 +144,12 @@ export default function Tests({ user, token }: { user: any, token: string }) {
       group_name: formData.get('group_name')
     };
 
-    const res = await fetch('/api/tests', {
+    await apiFetch('/api/tests', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(testData)
     });
-    if (res.ok) {
-      fetchTests();
-      setView('LIST');
-    }
+    fetchTests();
+    setView('LIST');
   };
 
   const handleAddQuestion = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -171,45 +165,36 @@ export default function Tests({ user, token }: { user: any, token: string }) {
       options: formData.get('type') === 'MCQ' ? (formData.get('options') as string).split(',').map(o => o.trim()) : null
     };
 
-    const res = await fetch(`/api/tests/${selectedTest.id}/questions`, {
+    await apiFetch(`/api/tests/${selectedTest.id}/questions`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(qData)
     });
-    if (res.ok) {
-      fetchQuestions(selectedTest.id);
-      form.reset();
-    }
+    fetchQuestions(selectedTest.id);
+    form.reset();
   };
 
   const handleDeleteQuestion = async (qId: number) => {
     if (!selectedTest) return;
     if (!confirm("A jeni i sigurt që dëshironi të fshini këtë pyetje?")) return;
     
-    const res = await fetch(`/api/questions/${qId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
+    await apiFetch(`/api/questions/${qId}`, {
+      method: 'DELETE'
     });
-    if (res.ok) {
-      fetchQuestions(selectedTest.id);
-    }
+    fetchQuestions(selectedTest.id);
   };
 
   const handleUpdateStatus = async (testId: number, status: string) => {
-    const res = await fetch(`/api/tests/${testId}/status`, {
+    await apiFetch(`/api/tests/${testId}/status`, {
       method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
     });
-    if (res.ok) fetchTests();
+    fetchTests();
   };
 
   const handleJoinTest = async (test: Test) => {
-    const res = await fetch(`/api/tests/${test.id}/join`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` }
+    const attempt = await apiFetch(`/api/tests/${test.id}/join`, {
+      method: 'POST'
     });
-    const attempt = await res.json();
     setCurrentAttempt(attempt);
     setSelectedTest(test);
     await fetchQuestions(test.id);
@@ -221,26 +206,21 @@ export default function Tests({ user, token }: { user: any, token: string }) {
     if (!currentAttempt) return;
     
     // Save final answers
-    await fetch(`/api/attempts/${currentAttempt.id}/save`, {
+    await apiFetch(`/api/attempts/${currentAttempt.id}/save`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ answers: Object.entries(answers).map(([qid, text]) => ({ questionId: parseInt(qid), answerText: text })) })
     });
 
     // Submit
-    const res = await fetch(`/api/attempts/${currentAttempt.id}/submit`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` }
+    await apiFetch(`/api/attempts/${currentAttempt.id}/submit`, {
+      method: 'POST'
     });
-    if (res.ok) {
-      setView('LIST');
-      alert('Testi u dorëzua me sukses!');
-    }
+    setView('LIST');
+    alert('Testi u dorëzua me sukses!');
   };
 
   const fetchGradingDetails = async (attemptId: number) => {
-    const res = await fetch(`/api/attempts/${attemptId}/details`, { headers: { 'Authorization': `Bearer ${token}` } });
-    const data = await res.json();
+    const data = await apiFetch(`/api/attempts/${attemptId}/details`);
     setGradingData(data);
     setView('GRADE');
   };
@@ -255,19 +235,16 @@ export default function Tests({ user, token }: { user: any, token: string }) {
       isCorrect: formData.get(`correct_${ans.id}`) === 'on'
     }));
 
-    const res = await fetch(`/api/attempts/${gradingData.attempt.id}/grade`, {
+    await apiFetch(`/api/attempts/${gradingData.attempt.id}/grade`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         grades, 
         feedback: formData.get('feedback'),
         finalGrade: parseInt(formData.get('finalGrade') as string)
       })
     });
-    if (res.ok) {
-      fetchMonitoring();
-      setView('MONITOR');
-    }
+    fetchMonitoring();
+    setView('MONITOR');
   };
 
   // Timer logic

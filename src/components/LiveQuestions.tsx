@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { HelpCircle, User, CheckCircle, XCircle, Play, Send, Award, Clock } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
+import { useAuth } from '../App';
 
 interface LiveQuestion {
   id: number;
@@ -13,7 +14,8 @@ interface LiveQuestion {
   answer?: string;
 }
 
-export default function LiveQuestions({ user, token }: { user: any, token: string }) {
+export default function LiveQuestions() {
+  const { user, apiFetch } = useAuth();
   const [questions, setQuestions] = useState<LiveQuestion[]>([]);
   const [newQuestion, setNewQuestion] = useState('');
   const [activeQuestion, setActiveQuestion] = useState<LiveQuestion | null>(null);
@@ -41,8 +43,7 @@ export default function LiveQuestions({ user, token }: { user: any, token: strin
 
   const fetchQuestions = async () => {
     try {
-      const res = await fetch('/api/live-questions', { headers: { 'Authorization': `Bearer ${token}` } });
-      const data = await res.json();
+      const data = await apiFetch('/api/live-questions');
       setQuestions(data);
       const active = data.find((q: any) => q.status !== 'GRADED' && (user.role === 'TEACHER' || q.student_id === user.id));
       if (active) setActiveQuestion(active);
@@ -53,39 +54,28 @@ export default function LiveQuestions({ user, token }: { user: any, token: strin
     if (!newQuestion) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/live-questions', {
+      await apiFetch('/api/live-questions', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify({ content: newQuestion })
       });
-      if (res.ok) {
-        setNewQuestion('');
-        fetchQuestions();
-      }
+      setNewQuestion('');
+      fetchQuestions();
     } catch (e) { console.error(e); }
     setLoading(false);
   };
 
   const confirmPresence = async () => {
     try {
-      await fetch(`/api/live-questions/${activeQuestion?.id}/confirm`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
+      await apiFetch(`/api/live-questions/${activeQuestion?.id}/confirm`, {
+        method: 'POST'
       });
     } catch (e) { console.error(e); }
   };
 
   const submitAnswer = async () => {
     try {
-      await fetch(`/api/live-questions/${activeQuestion?.id}/answer`, {
+      await apiFetch(`/api/live-questions/${activeQuestion?.id}/answer`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify({ answer })
       });
       setAnswer('');
@@ -94,12 +84,8 @@ export default function LiveQuestions({ user, token }: { user: any, token: strin
 
   const gradeAnswer = async () => {
     try {
-      await fetch(`/api/live-questions/${activeQuestion?.id}/grade`, {
+      await apiFetch(`/api/live-questions/${activeQuestion?.id}/grade`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
         body: JSON.stringify({ score })
       });
       setActiveQuestion(null);

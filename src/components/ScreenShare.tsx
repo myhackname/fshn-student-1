@@ -7,8 +7,10 @@ import {
   Check
 } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
+import { useAuth } from '../App';
 
-export default function ScreenShare({ user, token }: { user: any, token: string }) {
+export default function ScreenShare() {
+  const { user, token, apiFetch } = useAuth();
   const [isSharing, setIsSharing] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [mode, setMode] = useState<'SCREEN' | 'CAMERA'>('SCREEN');
@@ -37,10 +39,7 @@ export default function ScreenShare({ user, token }: { user: any, token: string 
     s.emit('join', { id: user.id, name: user.name, role: user.role });
 
     // Fetch class ID
-    fetch('/api/classes/my', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    .then(res => res.json())
+    apiFetch('/api/classes/my')
     .then(classes => {
       if (classes && classes.length > 0) {
         setClassId(classes[0].id);

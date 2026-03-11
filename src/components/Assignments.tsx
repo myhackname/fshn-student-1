@@ -7,8 +7,10 @@ import {
 } from 'lucide-react';
 import MotionLogo from './MotionLogo';
 import { Assignment, Submission } from '../types';
+import { useAuth } from '../App';
 
-export default function Assignments({ user, token }: { user: any, token: string }) {
+export default function Assignments() {
+  const { user, apiFetch } = useAuth();
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
@@ -38,10 +40,7 @@ export default function Assignments({ user, token }: { user: any, token: string 
 
   const fetchMySubmissions = async () => {
     try {
-      const res = await fetch('/api/my-submissions', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
+      const data = await apiFetch('/api/my-submissions');
       if (Array.isArray(data)) {
         setMySubmissions(data);
       } else {
@@ -55,10 +54,7 @@ export default function Assignments({ user, token }: { user: any, token: string 
 
   const fetchAssignments = async () => {
     try {
-      const res = await fetch('/api/assignments', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
+      const data = await apiFetch('/api/assignments');
       if (Array.isArray(data)) {
         setAssignments(data);
       } else {
@@ -73,10 +69,7 @@ export default function Assignments({ user, token }: { user: any, token: string 
 
   const fetchSubmissions = async (assignmentId: number) => {
     try {
-      const res = await fetch(`/api/assignments/${assignmentId}/submissions`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
+      const data = await apiFetch(`/api/assignments/${assignmentId}/submissions`);
       if (Array.isArray(data)) {
         setSubmissions(data);
       } else {
@@ -90,15 +83,11 @@ export default function Assignments({ user, token }: { user: any, token: string 
 
   const handleCreateAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch('/api/assignments', {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(newAssignment)
-    });
-    if (res.ok) {
+    try {
+      await apiFetch('/api/assignments', {
+        method: 'POST',
+        body: JSON.stringify(newAssignment)
+      });
       setShowCreateModal(false);
       setNewAssignment({ 
         title: '', description: '', deadline: '', materials: '', 
@@ -106,6 +95,8 @@ export default function Assignments({ user, token }: { user: any, token: string 
         program: 'BIOLOGJI', year: 'VITI 1 BACHELORE', group_name: 'A'
       });
       fetchAssignments();
+    } catch (error) {
+      console.error("Failed to create assignment:", error);
     }
   };
 
@@ -119,33 +110,32 @@ export default function Assignments({ user, token }: { user: any, token: string 
       formData.append('file', submissionFile);
     }
 
-    const res = await fetch(`/api/assignments/${selectedAssignment.id}/submit`, {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`
-      },
-      body: formData
-    });
-    if (res.ok) {
+    try {
+      await apiFetch(`/api/assignments/${selectedAssignment.id}/submit`, {
+        method: 'POST',
+        body: formData
+      });
       setSubmissionContent('');
       setSubmissionFile(null);
       setSelectedAssignment(null);
       alert('Detyra u dorëzua me sukses!');
       if (user.role === 'STUDENT') fetchMySubmissions();
+    } catch (error) {
+      console.error("Failed to submit assignment:", error);
     }
   };
 
   const handleGradeSubmission = async (subId: number, points: number, feedback: string, grade: number) => {
-    const res = await fetch(`/api/submissions/${subId}/grade`, {
-      method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ points, feedback, grade })
-    });
-    if (res.ok && selectedAssignment) {
-      fetchSubmissions(selectedAssignment.id);
+    try {
+      await apiFetch(`/api/submissions/${subId}/grade`, {
+        method: 'POST',
+        body: JSON.stringify({ points, feedback, grade })
+      });
+      if (selectedAssignment) {
+        fetchSubmissions(selectedAssignment.id);
+      }
+    } catch (error) {
+      console.error("Failed to grade submission:", error);
     }
   };
 
